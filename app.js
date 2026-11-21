@@ -151,6 +151,9 @@
         var ch = [];
         if (patch.status != null && patch.status !== p.status) ch.push('Status: ' + p.status + ' zu ' + patch.status);
         if (patch.danger != null && patch.danger !== p.danger) ch.push(patch.danger ? 'als gefährlich markiert' : 'nicht mehr gefährlich');
+        if (patch.gruppe != null && patch.gruppe !== (p.gruppe || '')) ch.push('Gruppierung: ' + (p.gruppe || 'leer') + ' zu ' + (patch.gruppe || 'leer'));
+        if (patch.gruppeRang != null && patch.gruppeRang !== (p.gruppeRang || '')) ch.push('Rang: ' + (p.gruppeRang || 'leer') + ' zu ' + (patch.gruppeRang || 'leer'));
+        if (patch.beschreibung != null && patch.beschreibung !== (p.beschreibung || '')) ch.push('Beschreibung geändert');
         Object.assign(p, patch);
         if (ch.length) llog('Person geändert', id, ch.join(', '));
         saveLocal();
@@ -384,13 +387,15 @@
       if (!q) return true;
       if (p.roblox.toLowerCase().indexOf(q) !== -1) return true;
       if (pq.isAt) return false;
-      return p.name.toLowerCase().indexOf(q) !== -1 || p.id.toLowerCase().indexOf(q) !== -1;
+      return p.name.toLowerCase().indexOf(q) !== -1 || p.id.toLowerCase().indexOf(q) !== -1 ||
+        (p.gruppe || '').toLowerCase().indexOf(q) !== -1;
     });
     $('count').textContent = list.length + ' Treffer' + (ui.error ? '. ' + ui.error : '');
     $('results').innerHTML = list.map(function (p) {
       return '<button type="button" class="person' + (p.id === ui.selId ? ' selected' : '') + '" data-action="select" data-id="' + esc(p.id) + '">' +
         '<span class="avatar">' + avatarHtml(p) + '</span>' +
-        '<span class="person-main"><strong>' + esc(p.name) + '</strong><span>@' + esc(p.roblox) + '  ' + esc(p.id) + '</span></span>' +
+        '<span class="person-main"><strong>' + esc(p.name) + '</strong><span>@' + esc(p.roblox) + '  ' + esc(p.id) +
+          (p.gruppe ? '  ' + esc(p.gruppe) + (p.gruppeRang ? ' (' + esc(p.gruppeRang) + ')' : '') : '') + '</span></span>' +
         (p.haftbefehle ? '<span class="person-hb">Haftbefehl</span>' : '') +
         (p.offen ? '<span class="person-open">ausstehend</span>' : '<span class="person-count">' + (p.count || 0) + (p.count === 1 ? ' Eintrag' : ' Einträge') + '</span>') +
         '<span class="chip ' + chipClass(p.status) + '">' + esc(p.status) + '</span></button>';
@@ -429,8 +434,38 @@
       $('admName').value = p.name; $('admRoblox').value = p.roblox; $('admMsg').textContent = '';
     }
   }
+  function renderInfo() {
+    var p = findPerson(ui.selId);
+    var box = $('infoBox');
+    box.hidden = !p;
+    if (!p) { box.dataset.pid = ''; return; }
+    if (box.dataset.pid !== p.id) { box.dataset.pid = p.id; closeInfoForm(); }
+    var hasAny = p.gruppe || p.gruppeRang || p.beschreibung;
+    $('infoView').hidden = !$('infoForm').hidden;
+    $('infoView').innerHTML = hasAny
+      ? '<dl class="hb-fields">' +
+          '<div><dt>Gruppierung</dt><dd>' + (p.gruppe ? '<button type="button" class="log-person" data-action="find-gruppe" data-gruppe="' + esc(p.gruppe) + '">' + esc(p.gruppe) + '</button>' : '-') + '</dd></div>' +
+          '<div><dt>Rang</dt><dd>' + esc(p.gruppeRang || '-') + '</dd></div>' +
+          (p.beschreibung ? '<div class="wide"><dt>Beschreibung</dt><dd class="info-text">' + esc(p.beschreibung) + '</dd></div>' : '') +
+        '</dl>'
+      : '<span class="empty-note">Noch keine Beschreibung.</span>';
+  }
+  function openInfoForm() {
+    var p = findPerson(ui.selId);
+    if (!p) return;
+    $('infoGruppe').value = p.gruppe || ''; $('infoRang').value = p.gruppeRang || ''; $('infoText').value = p.beschreibung || '';
+    var gruppen = {};
+    people.forEach(function (x) { if (x.gruppe) gruppen[x.gruppe] = true; });
+    $('gruppenListe').innerHTML = Object.keys(gruppen).sort().map(function (g) { return '<option value="' + esc(g) + '">'; }).join('');
+    $('infoForm').hidden = false; $('infoView').hidden = true; $('infoEditBtn').hidden = true; $('infoError').textContent = '';
+    $('infoGruppe').focus();
+  }
+  function closeInfoForm() {
+    $('infoForm').hidden = true; $('infoView').hidden = false; $('infoEditBtn').hidden = false; $('infoError').textContent = '';
+  }
   function renderRecord() {
     renderAdmin();
+    renderInfo();
     var box = $('record'), hist = $('history');
     var p = findPerson(ui.selId);
     $('strafeBox').hidden = !p;
@@ -798,6 +833,8 @@
     } else if (a === 'all-done') {
       var p2 = findPerson(ui.selId);
       if (p2 && !ui.busy) run(p2, store.allDone(p2.id), '');
+    } else if (a === 'find-gruppe') {
+      ui.tab = 'personen'; ui.q = el.dataset.gruppe; $('q').value = ui.q; renderResults();
     } else if (a === 'adjust') {
       var pa = findPerson(ui.selId);
       var ea = pa && (akten[pa.id] || []).find(function (x) { return x.id === Number(el.dataset.eid); });
@@ -912,6 +949,22 @@
     officerName.classList.toggle('missing', !o.name);
     officerNr.classList.toggle('missing', !o.nr);
   }
+  $('infoEditBtn').addEventListener('click', function (ev) { if (!blockIfNoOfficer(ev)) openInfoForm(); });
+  $('infoCancel').addEventListener('click', closeInfoForm);
+  $('infoForm').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    if (blockIfNoOfficer(ev)) return;
+    var p = findPerson(ui.selId);
+    if (!p) return;
+    var patch = { gruppe: $('infoGruppe').value.trim(), gruppeRang: $('infoRang').value.trim(), beschreibung: $('infoText').value.trim() };
+    var btn = $('infoForm').querySelector('[type="submit"]'); btn.disabled = true;
+    store.update(p.id, patch).then(function (np) {
+      btn.disabled = false;
+      Object.assign(p, { gruppe: np.gruppe, gruppeRang: np.gruppeRang, beschreibung: np.beschreibung });
+      closeInfoForm(); renderResults(); renderRecord();
+      if (ui.tab === 'log') loadLog();
+    }).catch(function (e) { btn.disabled = false; $('infoError').textContent = e.message; });
+  });
   var WRITE_ACTIONS = ['create', 'give', 'all-done', 'done', 'remove', 'hb-set', 'hb-delete', 'adjust', 'adj-save'];
   // Eingaben beim Anpassen merken, damit ein Neuzeichnen sie nicht verliert
   document.addEventListener('input', function (ev) {
@@ -956,7 +1009,7 @@
   // Andere Beamte sehen Änderungen nach spätestens 20 Sekunden
   setInterval(function () {
     if (mode === 'server' && !document.hidden && $('gate').hidden && $('discordGate').hidden) {
-      if (!ui.edit) { refreshPeople(); if (ui.selId) { loadAkte(ui.selId, true); loadHb(ui.selId); } }
+      if (!ui.edit && $('infoForm').hidden) { refreshPeople(); if (ui.selId) { loadAkte(ui.selId, true); loadHb(ui.selId); } }
       if (ui.tab === 'log') loadLog();
       if (authMode === 'discord') api('me').then(function (m) { me = m; isAdmin = !!m.admin; renderMe(); renderRecord(); }).catch(function () {});
     }

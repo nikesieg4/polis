@@ -119,7 +119,10 @@ function personOut(r) {
     danger: !!r.danger,
     count: r.count || 0,
     offen: r.offen || 0,
-    haftbefehle: r.hb || 0
+    haftbefehle: r.hb || 0,
+    gruppe: r.gruppe || '',
+    gruppeRang: r.gruppe_rang || '',
+    beschreibung: r.beschreibung || ''
   };
 }
 function parseId(id) {
@@ -133,6 +136,9 @@ async function ensureSchema(db) {
   await db.batch(SCHEMA.map((s) => db.prepare(s)));
   // Ältere Datenbanken: Spalte „erledigt“ nachrüsten
   try { await db.prepare('ALTER TABLE akte ADD COLUMN erledigt INTEGER NOT NULL DEFAULT 0').run(); } catch { /* existiert schon */ }
+  for (const c of ['gruppe TEXT', 'gruppe_rang TEXT', 'beschreibung TEXT']) {
+    try { await db.prepare('ALTER TABLE people ADD COLUMN ' + c).run(); } catch { /* existiert schon */ }
+  }
   for (const m of MEMBER_MIGRATIONS) { try { await db.prepare(m).run(); } catch { /* existiert schon */ } }
   schemaReady = true;
 }
@@ -358,7 +364,7 @@ export async function onRequest(context) {
     const person = await db.prepare('SELECT * FROM people WHERE num = ?').bind(num).first();
     if (!person) return fail(404, 'Person nicht gefunden.');
 
-    // PATCH /api/people/:id  { status?, danger? }  –  name und roblox nur als Admin
+    // PATCH /api/people/:id  { status?, danger?, gruppe?, gruppeRang?, beschreibung? }  –  name und roblox nur als Admin
     if (parts.length === 2 && method === 'PATCH') {
       const b = await readBody(request);
       const status = STATUSES.includes(b.status) ? b.status : person.status;
@@ -380,9 +386,17 @@ export async function onRequest(context) {
           }
         }
       }
-      const row = await db.prepare('UPDATE people SET status = ?, danger = ?, name = ?, roblox = ?, roblox_id = ? WHERE num = ? RETURNING *')
-        .bind(status, danger, name, roblox, robloxId, num).first();
+      // Beschreibung: Gruppierung, Rang darin, freier Text – darf jeder Beamte ändern
+      const gruppe = b.gruppe != null ? clean(b.gruppe, 60) : (person.gruppe || '');
+      const gruppeRang = b.gruppeRang != null ? clean(b.gruppeRang, 60) : (person.gruppe_rang || '');
+      const beschreibung = b.beschreibung != null ? String(b.beschreibung).replace(/\r/g, '').trim().slice(0, 2000) : (person.beschreibung || '');
+      const row = await db.prepare('UPDATE people SET status = ?, danger = ?, name = ?, roblox = ?, roblox_id = ?, gruppe = ?, gruppe_rang = ?, beschreibung = ? WHERE num = ? RETURNING *')
+        .bind(status, danger, name, roblox, robloxId, gruppe || null, gruppeRang || null, beschreibung || null, num).first();
       const changes = [];
+      const was = (v) => v ? v : 'leer';
+      if (gruppe !== (person.gruppe || '')) changes.push('Gruppierung: ' + was(person.gruppe) + ' zu ' + was(gruppe));
+      if (gruppeRang !== (person.gruppe_rang || '')) changes.push('Rang: ' + was(person.gruppe_rang) + ' zu ' + was(gruppeRang));
+      if (beschreibung !== (person.beschreibung || '')) changes.push('Beschreibung geändert');
       if (status !== person.status) changes.push('Status: ' + person.status + ' zu ' + status);
       if (danger !== person.danger) changes.push(danger ? 'als gefährlich markiert' : 'nicht mehr gefährlich');
       if (name !== person.name) changes.push('Name: ' + person.name + ' zu ' + name);

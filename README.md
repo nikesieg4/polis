@@ -8,6 +8,7 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 - **Personensuche** (links): Suche nach RP-Name, Personen-ID oder `@RobloxName`. Unbekannte Spieler lassen sich direkt anlegen; der Account wird bei Roblox geprüft und der Avatar angezeigt.
 - **Strafregister** (rechts): Strafe suchen (z. B. „Raub“ oder „8“) und anklicken, die Person bekommt sie sofort mit der Mindeststrafe aus dem Strafgesetzbuch (§ 1 bis 10). Oben steht, was **ausstehend** ist (Geld und Haftzeit); mit „Erledigt“ wird es abgehakt. Ausstehende Strafen lassen sich mit „Anpassen“ innerhalb der Spanne des Paragraphen erhöhen (Geld und Haftzeit, wird protokolliert) oder bei einem Fehlklick entfernen.
 
+- **Beschreibung** pro Person: Gruppierung (z. B. Kartell), Rang in der Gruppierung und freier Text. Jeder Beamte darf sie ändern, Änderungen stehen im Protokoll. Die Personensuche findet auch Gruppierungen; ein Klick auf die Gruppierung zeigt alle Mitglieder.
 - **Haftbefehle**: bei der Person ausstellen (Kennzeichen, Auto Modell, Grund, Beweise; ausgestellt von = eigener Name). Offene Haftbefehle stehen im Tab „Haftbefehle“ und als roter Balken bei der Person. Status: offen, vollstreckt, aufgehoben. „Für Discord kopieren“ erzeugt den Text im Discord-Format; der Teamtag pingt die Rolle @Präsidium-Team (`TEAMTAG` in `app.js`, Rollen-ID 1476650119700156618).
 
 - **Protokoll**: Jede Änderung (Person angelegt/geändert, Strafe vergeben/erledigt/entfernt, Haftbefehl ausgestellt/vollstreckt/aufgehoben) wird mit Name, Dienstnummer und Uhrzeit gespeichert und ist im Tab „Protokoll“ durchsuchbar. Ohne Name und Dienstnummer oben kann man nichts eintragen; die API lehnt Änderungen ohne die Header `x-polis-name` und `x-polis-nr` ab.
@@ -74,6 +75,7 @@ Mit Discord-Anmeldung: Sitzungs-Cookie `polis_session` (über `/api/auth/discord
 | PATCH | `/api/haftbefehle/:id` | `status`: `offen`, `vollstreckt`, `aufgehoben` |
 | GET | `/api/log?limit=200&person=P-1001` | Protokoll (optional nur eine Person) |
 | GET | `/api/admin` | Admin-Passwort prüfen (Header `x-polis-admin`) |
+| PATCH | `/api/people/:id` mit `gruppe` / `gruppeRang` / `beschreibung` | Beschreibung ändern (alle Beamten) |
 | PATCH | `/api/people/:id` mit `name` / `roblox` | Person bearbeiten (Admin) |
 | DELETE | `/api/people/:id` | Person mit allen Einträgen löschen (Admin) |
 | DELETE | `/api/haftbefehle/:id` | Haftbefehl löschen (Admin) |
