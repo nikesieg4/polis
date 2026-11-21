@@ -214,8 +214,8 @@
   function api(path, opts) {
     opts = opts || {};
     var o = prefs.officer || {};
-    var headers = { 'x-polis-key': key, 'x-polis-name': encodeURIComponent(o.name || ''), 'x-polis-nr': encodeURIComponent(o.nr || '') };
-    if (adminKey) headers['x-polis-admin'] = adminKey;
+    var headers = { 'x-polis-key': encodeURIComponent(key), 'x-polis-name': encodeURIComponent(o.name || ''), 'x-polis-nr': encodeURIComponent(o.nr || '') };
+    if (adminKey) headers['x-polis-admin'] = encodeURIComponent(adminKey);
     if (opts.body) headers['content-type'] = 'application/json';
     return fetch('/api/' + path, { method: opts.method || 'GET', headers: headers, body: opts.body ? JSON.stringify(opts.body) : undefined })
       .then(function (r) {
@@ -576,7 +576,7 @@
   $('adminForm').addEventListener('submit', function (ev) {
     ev.preventDefault();
     var prev = adminKey;
-    setAdminKey($('adminKey').value);
+    setAdminKey($('adminKey').value.trim());
     api('admin').then(function () {
       isAdmin = true; $('adminGate').hidden = true; $('adminKey').value = '';
       renderRecord();

@@ -133,6 +133,17 @@ async function ensureSchema(db) {
   schemaReady = true;
 }
 
+// Passwort aus dem Header mit dem Secret vergleichen. Der Client schickt URL-kodiert,
+// damit Umlaute (ä, ö, ü, ß, €) heil ankommen; Leerzeichen am Rand zählen nicht.
+function keyMatches(headerValue, secret) {
+  if (!secret || !headerValue) return false;
+  const want = String(secret).trim().normalize('NFC');
+  let got = headerValue;
+  try { got = decodeURIComponent(headerValue); } catch { /* alter Client: unkodiert */ }
+  got = got.trim().normalize('NFC');
+  return safeEqual(got, want) || safeEqual(headerValue.trim(), want);
+}
+
 function safeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
   let d = 0;
@@ -185,11 +196,11 @@ export async function onRequest(context) {
   // --- Ab hier: Dienstschlüssel nötig ---
   if (!env.DB) return fail(503, 'Datenbank nicht verbunden (D1-Binding „DB“ fehlt).');
   if (!env.POLIS_KEY) return fail(503, 'Dienstschlüssel nicht eingerichtet (Variable „POLIS_KEY“ fehlt).');
-  if (!safeEqual(request.headers.get('x-polis-key') || '', env.POLIS_KEY)) return fail(401, 'Falscher Dienstschlüssel.');
+  if (!keyMatches(request.headers.get('x-polis-key'), env.POLIS_KEY)) return fail(401, 'Falscher Dienstschlüssel.');
 
   const db = env.DB;
   await ensureSchema(db);
-  const isAdmin = !!env.POLIS_KEY_ADMIN && safeEqual(request.headers.get('x-polis-admin') || '', env.POLIS_KEY_ADMIN);
+  const isAdmin = keyMatches(request.headers.get('x-polis-admin'), env.POLIS_KEY_ADMIN);
   const needAdmin = () => fail(403, 'Dafür ist das Admin-Passwort nötig.');
 
   // GET /api/auth – Schlüssel prüfen
