@@ -63,6 +63,7 @@
   function savePrefs() { lsSet(PREFS_KEY, prefs); }
   var authMode = 'key'; // 'key' | 'discord'
   var me = null;        // angemeldetes Discord-Mitglied
+  function canHb() { return authMode !== 'discord' || !!(me && me.canHb); }
   function officerLabel() {
     if (authMode === 'discord') return me ? me.name + ' (@' + me.username + ')' : 'Unbekannt';
     var o = prefs.officer || {};
@@ -491,6 +492,11 @@
     if (!p) return;
     var list = hbByPerson[p.id];
     var statusText = { offen: 'Offen', vollstreckt: 'Vollstreckt', aufgehoben: 'Aufgehoben' };
+    var hbOk = canHb();
+    $('hbNewBtn').hidden = !hbOk || !$('hbForm').hidden;
+    $('hbRankNote').hidden = hbOk;
+    $('hbRankNote').textContent = 'Haftbefehle ausstellen und bearbeiten ab A' + ((me && me.hbMinRank) || 4) + '.';
+    if (!hbOk) $('hbForm').hidden = true;
     $('hbList').innerHTML = (ui.hbMsg ? '<span class="saved hb-msg" role="status">' + esc(ui.hbMsg) + '</span>' : '') +
       (!list ? '<span class="empty-note">Wird geladen</span>' : list.length ? list.map(function (h) {
         var open = h.status === 'offen';
@@ -505,7 +511,7 @@
           '</dl>' +
           '<div class="entry-actions">' +
             '<button type="button" class="mini" data-action="hb-copy" data-hid="' + h.id + '">Für Discord kopieren</button>' +
-            (open
+            (!hbOk ? '' : open
               ? '<button type="button" class="mini" data-action="hb-set" data-status="vollstreckt" data-hid="' + h.id + '">Vollstreckt</button>' +
                 '<button type="button" class="mini mini-danger" data-action="hb-set" data-status="aufgehoben" data-hid="' + h.id + '">Aufheben</button>'
               : '<button type="button" class="mini" data-action="hb-set" data-status="offen" data-hid="' + h.id + '">Wieder öffnen</button>') +
@@ -530,7 +536,7 @@
     });
   }
   function closeHbForm() {
-    $('hbForm').hidden = true; $('hbNewBtn').hidden = false; $('hbFormError').textContent = '';
+    $('hbForm').hidden = true; $('hbNewBtn').hidden = !canHb(); $('hbFormError').textContent = '';
     ['hbKz', 'hbModell', 'hbGrund', 'hbBeweise'].forEach(function (id) { $(id).value = ''; });
   }
 
@@ -628,7 +634,7 @@
     }).catch(function (e) { $('admMsg').textContent = e.message; });
   });
   var LOGIN_REASONS = {
-    'keine-rolle': 'Dir fehlt die Polizei-Rolle auf dem Discord-Server.',
+    'keine-rolle': 'Kein Zugriff: Du brauchst auf dem Discord-Server eine Rolle von A1 bis A10 oder Datenbank Admin.',
     'abgebrochen': 'Anmeldung abgebrochen.',
     'ungueltig': 'Anmeldung abgelaufen. Bitte noch einmal versuchen.',
     'fehler': 'Anmeldung bei Discord fehlgeschlagen. Bitte noch einmal versuchen.'

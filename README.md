@@ -15,7 +15,15 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 - **Admin** (Knopf „Admin“ oben, Passwort = Secret `POLIS_KEY_ADMIN`): RP-Name und Roblox-Namen einer Person ändern (neuer Account wird bei Roblox geprüft), auch erledigte Strafen löschen, Haftbefehle löschen, Personen mit allen Einträgen löschen. Alles landet mit „(Admin)“ im Protokoll. Das Admin-Passwort gilt nur bis der Tab geschlossen wird.
 
 ## Anmeldung mit Discord
-Sobald die Discord-Secrets gesetzt sind, meldet man sich mit Discord an statt mit Dienstschlüssel und selbst eingetragenem Namen. Der Bot liest vom Discord-Server den **Server-Nickname** und die **Rollen**: Rein kommt nur, wer eine Polizei-Rolle hat; Admin ist, wer eine Admin-Rolle hat. Im Protokoll steht der Nickname (mit Dienstnummer) und der Discord-Name. Rollen werden höchstens alle 5 Minuten neu geprüft; wer die Rolle verliert, fliegt danach raus. Code: `lib/discord.js`.
+Sobald die Discord-Secrets gesetzt sind, meldet man sich mit Discord an statt mit Dienstschlüssel und selbst eingetragenem Namen. Der Bot liest vom Discord-Server den **Server-Nickname** und die **Rollen** (über ihre Namen):
+
+| Rolle | Rechte |
+|---|---|
+| A1 bis A10 | Zugriff, Personen anlegen, Strafen vergeben, Haftbefehle ansehen |
+| ab A4 | zusätzlich Haftbefehle ausstellen, vollstrecken, aufheben |
+| Datenbank Admin | alles, auch ohne A-Rolle: Personen bearbeiten/löschen, Strafen und Haftbefehle löschen |
+
+Grenzen änderbar per Secret `POLIS_MIN_RANK` (Standard 1), `POLIS_HB_MIN_RANK` (Standard 4), Admin-Rollenname per `POLIS_ADMIN_ROLE_NAME`. Im Protokoll steht der Nickname (mit Dienstnummer) und der Discord-Name. Rollen werden höchstens alle 5 Minuten neu geprüft; wer die Rolle verliert, fliegt danach raus. Code: `lib/discord.js`.
 
 Einrichtung:
 1. [Discord Developer Portal](https://discord.com/developers/applications) → *New Application*.
@@ -26,8 +34,8 @@ Einrichtung:
    - `DISCORD_CLIENT_SECRET` (OAuth2 → Client Secret)
    - `DISCORD_BOT_TOKEN`
    - `DISCORD_GUILD_ID` (Rechtsklick auf den Server → Server-ID kopieren, Entwicklermodus nötig)
-   - `POLIS_ROLE_IDS` (Rollen mit Zugriff, mehrere mit Komma)
-   - `POLIS_ADMIN_ROLE_IDS` (Admin-Rollen, optional)
+
+   Rollen-IDs sind nicht nötig, die Rollen werden über ihre Namen (A1 … A10, Datenbank Admin) erkannt.
 5. Neu deployen. Ab dann gelten `POLIS_KEY` und `POLIS_KEY_ADMIN` nicht mehr und können gelöscht werden.
 
 ## Hosting

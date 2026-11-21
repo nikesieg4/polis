@@ -8,7 +8,7 @@
  * Die Tabellen werden beim ersten Aufruf automatisch angelegt.
  */
 
-import { discordConfigured, handleAuth, requireMember, MEMBER_SCHEMA } from '../../lib/discord.js';
+import { discordConfigured, handleAuth, requireMember, rankLimits, MEMBER_SCHEMA, MEMBER_MIGRATIONS } from '../../lib/discord.js';
 
 const STATUSES = ['Sauber', 'Bewährung', 'Fahndung'];
 
@@ -133,6 +133,7 @@ async function ensureSchema(db) {
   await db.batch(SCHEMA.map((s) => db.prepare(s)));
   // Ältere Datenbanken: Spalte „erledigt“ nachrüsten
   try { await db.prepare('ALTER TABLE akte ADD COLUMN erledigt INTEGER NOT NULL DEFAULT 0').run(); } catch { /* existiert schon */ }
+  for (const m of MEMBER_MIGRATIONS) { try { await db.prepare(m).run(); } catch { /* existiert schon */ } }
   schemaReady = true;
 }
 
@@ -201,7 +202,7 @@ export async function onRequest(context) {
   const db = env.DB;
   await ensureSchema(db);
 
-  let isAdmin, officer;
+  let isAdmin, officer, canHb = true;
   if (discordConfigured(env)) {
     // --- Anmeldung über Discord: Name und Rollen kommen vom Discord-Server ---
     if (parts[0] === 'auth') {
@@ -213,9 +214,11 @@ export async function onRequest(context) {
     // Schutz gegen fremde Seiten, die mit dem Cookie Änderungen auslösen wollen
     if (method !== 'GET' && request.headers.get('x-polis') !== '1') return fail(403, 'Ungültige Anfrage.');
     isAdmin = !!auth.member.admin;
+    canHb = isAdmin || (auth.member.rang || 0) >= rankLimits(env).hb;
     officer = { name: auth.member.name || auth.member.username, nr: '@' + auth.member.username };
     if (route === 'me') {
-      return json({ name: officer.name, username: auth.member.username, avatar: auth.member.avatar, admin: isAdmin });
+      return json({ name: officer.name, username: auth.member.username, avatar: auth.member.avatar, admin: isAdmin,
+        rang: auth.member.rang || 0, canHb, hbMinRank: rankLimits(env).hb });
     }
   } else {
     // --- Alter Weg: gemeinsamer Dienstschlüssel, Name und Dienstnummer selbst eingetragen ---
@@ -229,6 +232,7 @@ export async function onRequest(context) {
       return fail(403, 'Bitte oben Name und Dienstnummer eintragen.');
     }
   }
+  const needHb = () => fail(403, 'Haftbefehle bearbeiten darf man erst ab A' + rankLimits(env).hb + '.');
   const needAdmin = () => fail(403, discordConfigured(env) ? 'Dafür brauchst du die Admin-Rolle auf dem Discord-Server.' : 'Dafür ist das Admin-Passwort nötig.');
   const beamter = officer.name + ' (' + officer.nr + ')';
   const logIt = (aktion, personNum, details) => db.prepare(
@@ -293,6 +297,7 @@ export async function onRequest(context) {
 
   // PATCH /api/haftbefehle/:id  { status: 'vollstreckt' | 'aufgehoben' | 'offen', beamter }
   if (parts[0] === 'haftbefehle' && parts.length === 2 && method === 'PATCH') {
+    if (!canHb) return needHb();
     const hid = Number(parts[1]);
     const b = await readBody(request);
     if (!Number.isInteger(hid) || !HB_STATUS.includes(b.status)) return fail(400, 'Ungültiger Status.');
@@ -400,6 +405,7 @@ export async function onRequest(context) {
 
     // POST /api/people/:id/haftbefehle  { kennzeichen, modell, grund, beweise, beamter }
     if (parts.length === 3 && parts[2] === 'haftbefehle' && method === 'POST') {
+      if (!canHb) return needHb();
       const b = await readBody(request);
       const grund = clean(b.grund, 200);
       if (!grund) return fail(400, 'Grund fehlt.');
