@@ -77,7 +77,13 @@ const SCHEMA = [
      details TEXT
    )`,
   `CREATE INDEX IF NOT EXISTS log_person ON log(person_num)`,
-  MEMBER_SCHEMA
+  MEMBER_SCHEMA,
+  `CREATE TABLE IF NOT EXISTS gruppen (
+     name TEXT PRIMARY KEY COLLATE NOCASE,
+     beschreibung TEXT,
+     updated_at INTEGER,
+     updated_by TEXT
+   )`
 ];
 const HB_STATUS = ['offen', 'vollstreckt', 'aufgehoben'];
 function hbOut(r) {
@@ -211,7 +217,7 @@ export async function onRequest(context) {
   const db = env.DB;
   await ensureSchema(db);
 
-  let isAdmin, officer, canHb = true;
+  let isAdmin, officer, canHb = true, canGruppe = true;
   // Ohne Discord anmelden (Testphase): nur wenn POLIS_KEY noch existiert und der Client ihn mitschickt
   const viaKey = !!env.POLIS_KEY && !!request.headers.get('x-polis-key');
   if (discordConfigured(env) && !viaKey) {
@@ -226,10 +232,11 @@ export async function onRequest(context) {
     if (method !== 'GET' && request.headers.get('x-polis') !== '1') return fail(403, 'Ungültige Anfrage.');
     isAdmin = !!auth.member.admin;
     canHb = isAdmin || (auth.member.rang || 0) >= rankLimits(env).hb;
+    canGruppe = isAdmin || (auth.member.rang || 0) >= rankLimits(env).gruppe;
     officer = { name: auth.member.name || auth.member.username, nr: '@' + auth.member.username };
     if (route === 'me') {
       return json({ name: officer.name, username: auth.member.username, avatar: auth.member.avatar, admin: isAdmin,
-        rang: auth.member.rang || 0, canHb, hbMinRank: rankLimits(env).hb });
+        rang: auth.member.rang || 0, canHb, hbMinRank: rankLimits(env).hb, canGruppe, gruppeMinRank: rankLimits(env).gruppe });
     }
   } else {
     // --- Alter Weg: gemeinsamer Dienstschlüssel, Name und Dienstnummer selbst eingetragen ---
@@ -283,6 +290,59 @@ export async function onRequest(context) {
     } catch {
       return fail(502, 'Roblox ist gerade nicht erreichbar.');
     }
+  }
+
+  // ---------- Gruppierungen ----------
+  // GET /api/gruppen – alle Gruppierungen mit Mitgliederzahl
+  if (parts[0] === 'gruppen' && parts.length === 1 && method === 'GET') {
+    const { results } = await db.prepare(
+      `SELECT g.name, COUNT(p.num) AS count, gr.beschreibung
+         FROM (SELECT gruppe AS name FROM people WHERE gruppe IS NOT NULL AND gruppe != ''
+               UNION SELECT name FROM gruppen WHERE beschreibung IS NOT NULL AND beschreibung != '') g
+         LEFT JOIN people p ON p.gruppe = g.name COLLATE NOCASE
+         LEFT JOIN gruppen gr ON gr.name = g.name COLLATE NOCASE
+        GROUP BY g.name COLLATE NOCASE ORDER BY COUNT(p.num) DESC, g.name`
+    ).all();
+    return json({ gruppen: results.map((r) => ({ name: r.name, count: r.count || 0, hatBeschreibung: !!r.beschreibung })) });
+  }
+
+  // GET /api/gruppen/:name – Beschreibung und Mitglieder
+  if (parts[0] === 'gruppen' && parts.length === 2 && method === 'GET') {
+    const name = clean(parts[1], 60);
+    const g = await db.prepare('SELECT * FROM gruppen WHERE name = ?').bind(name).first();
+    const { results } = await db.prepare(
+      `SELECT p.*,
+              (SELECT COUNT(*) FROM akte a WHERE a.person_num = p.num) AS count,
+              (SELECT COUNT(*) FROM akte a WHERE a.person_num = p.num AND a.erledigt = 0) AS offen,
+              (SELECT COUNT(*) FROM haftbefehle h WHERE h.person_num = p.num AND h.status = 'offen') AS hb
+         FROM people p WHERE p.gruppe = ? COLLATE NOCASE ORDER BY p.name`
+    ).bind(name).all();
+    if (!g && !results.length) return fail(404, 'Gruppierung nicht gefunden.');
+    return json({
+      name: results[0] ? results[0].gruppe : g.name,
+      beschreibung: (g && g.beschreibung) || '',
+      updatedAt: g ? g.updated_at : null,
+      updatedBy: (g && g.updated_by) || '',
+      mitglieder: results.map(personOut)
+    });
+  }
+
+  // PUT /api/gruppen/:name  { beschreibung }  – ab A6 (bzw. POLIS_GRUPPE_MIN_RANK) oder Admin
+  if (parts[0] === 'gruppen' && parts.length === 2 && method === 'PUT') {
+    if (!canGruppe) return fail(403, 'Die Beschreibung von Gruppierungen darf man erst ab A' + rankLimits(env).gruppe + ' ändern.');
+    const name = clean(parts[1], 60);
+    if (!name) return fail(400, 'Name fehlt.');
+    const b = await readBody(request);
+    const text = String(b.beschreibung == null ? '' : b.beschreibung).replace(/\r/g, '').trim().slice(0, 4000);
+    const old = await db.prepare('SELECT beschreibung FROM gruppen WHERE name = ?').bind(name).first();
+    if ((old && old.beschreibung || '') === text) return json({ ok: true, unchanged: true });
+    await db.batch([
+      db.prepare(`INSERT INTO gruppen (name, beschreibung, updated_at, updated_by) VALUES (?, ?, ?, ?)
+                  ON CONFLICT(name) DO UPDATE SET beschreibung = excluded.beschreibung, updated_at = excluded.updated_at, updated_by = excluded.updated_by`)
+        .bind(name, text || null, Date.now(), beamter),
+      logIt('Gruppierung beschrieben', null, name + (text ? '' : ' (Beschreibung gelöscht)'))
+    ]);
+    return json({ ok: true });
   }
 
   // GET /api/haftbefehle?status=offen

@@ -9,6 +9,7 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 - **Strafregister** (rechts): Strafe suchen (z. B. „Raub“ oder „8“) und anklicken, die Person bekommt sie sofort mit der Mindeststrafe aus dem Strafgesetzbuch (§ 1 bis 10). Oben steht, was **ausstehend** ist (Geld und Haftzeit); mit „Erledigt“ wird es abgehakt. Ausstehende Strafen lassen sich mit „Anpassen“ innerhalb der Spanne des Paragraphen erhöhen (Geld und Haftzeit, wird protokolliert) oder bei einem Fehlklick entfernen.
 
 - **Beschreibung** pro Person: Gruppierung (z. B. Kartell), Rang in der Gruppierung und freier Text. Jeder Beamte darf sie ändern, Änderungen stehen im Protokoll. Die Personensuche findet auch Gruppierungen; ein Klick auf die Gruppierung zeigt alle Mitglieder.
+- **Gruppierungen** (Tab links): alle Gruppierungen mit Mitgliederzahl; die Seite einer Gruppierung zeigt ihre Beschreibung und alle Mitglieder mit Rang. Die Beschreibung der Gruppierung dürfen nur A6 und höher sowie Datenbank Admin ändern (`POLIS_GRUPPE_MIN_RANK`, Standard 6).
 - **Haftbefehle**: bei der Person ausstellen (Kennzeichen, Auto Modell, Grund, Beweise; ausgestellt von = eigener Name). Offene Haftbefehle stehen im Tab „Haftbefehle“ und als roter Balken bei der Person. Status: offen, vollstreckt, aufgehoben. „Für Discord kopieren“ erzeugt den Text im Discord-Format; der Teamtag pingt die Rolle @Präsidium-Team (`TEAMTAG` in `app.js`, Rollen-ID 1476650119700156618).
 
 - **Protokoll**: Jede Änderung (Person angelegt/geändert, Strafe vergeben/erledigt/entfernt, Haftbefehl ausgestellt/vollstreckt/aufgehoben) wird mit Name, Dienstnummer und Uhrzeit gespeichert und ist im Tab „Protokoll“ durchsuchbar. Ohne Name und Dienstnummer oben kann man nichts eintragen; die API lehnt Änderungen ohne die Header `x-polis-name` und `x-polis-nr` ab.
@@ -22,6 +23,7 @@ Sobald die Discord-Secrets gesetzt sind, meldet man sich mit Discord an statt mi
 |---|---|
 | A1 bis A10 | Zugriff, Personen anlegen, Strafen vergeben, Haftbefehle ansehen |
 | ab A4 | zusätzlich Haftbefehle ausstellen, vollstrecken, aufheben |
+| ab A6 | zusätzlich Beschreibung von Gruppierungen ändern |
 | Datenbank Admin | alles, auch ohne A-Rolle: Personen bearbeiten/löschen, Strafen und Haftbefehle löschen |
 
 Grenzen änderbar per Secret `POLIS_MIN_RANK` (Standard 1), `POLIS_HB_MIN_RANK` (Standard 4), Admin-Rollenname per `POLIS_ADMIN_ROLE_NAME`. Im Protokoll steht der Nickname (mit Dienstnummer) und der Discord-Name. Rollen werden höchstens alle 5 Minuten neu geprüft; wer die Rolle verliert, fliegt danach raus. Code: `lib/discord.js`.
@@ -79,6 +81,8 @@ Mit Discord-Anmeldung: Sitzungs-Cookie `polis_session` (über `/api/auth/discord
 | PATCH | `/api/people/:id` mit `name` / `roblox` | Person bearbeiten (Admin) |
 | DELETE | `/api/people/:id` | Person mit allen Einträgen löschen (Admin) |
 | DELETE | `/api/haftbefehle/:id` | Haftbefehl löschen (Admin) |
+| GET | `/api/gruppen` | Alle Gruppierungen mit Mitgliederzahl |
+| GET / PUT | `/api/gruppen/:name` | Beschreibung und Mitglieder / Beschreibung ändern (ab A6) |
 | GET | `/api/roblox/:name` | Roblox-Account nachschlagen |
 | GET | `/api/avatar/:robloxId` | Weiterleitung auf das Roblox-Avatarbild |
 

@@ -69,6 +69,7 @@
   var authMode = 'key'; // 'key' | 'discord'
   var me = null;        // angemeldetes Discord-Mitglied
   function canHb() { return authMode !== 'discord' || !!(me && me.canHb); }
+  function canGruppe() { return authMode !== 'discord' || !!(me && me.canGruppe); }
   function officerLabel() {
     if (authMode === 'discord') return me ? me.name + ' (@' + me.username + ')' : 'Unbekannt';
     var o = prefs.officer || {};
@@ -204,6 +205,32 @@
       var p = local.people.find(function (x) { return x.id === h.personId; }) || {};
       return Object.assign({}, h, { name: p.name, roblox: p.roblox, robloxId: p.robloxId });
     },
+    gruppen: function () {
+      var m = {};
+      local.people.forEach(function (p) {
+        if (!p.gruppe) return;
+        var k = p.gruppe.toLowerCase();
+        m[k] = m[k] || { name: p.gruppe, count: 0 }; m[k].count++;
+      });
+      Object.keys(local.gruppen || {}).forEach(function (k) {
+        if (!m[k] && local.gruppen[k].beschreibung) m[k] = { name: local.gruppen[k].name, count: 0 };
+      });
+      return Promise.resolve(Object.keys(m).map(function (k) { return m[k]; }).sort(function (a, b) { return b.count - a.count || a.name.localeCompare(b.name); }));
+    },
+    gruppe: function (name) {
+      var k = name.toLowerCase(), g = (local.gruppen || {})[k] || {};
+      return LocalStore.list().then(function (all) {
+        var mit = all.filter(function (p) { return (p.gruppe || '').toLowerCase() === k; });
+        return { name: mit[0] ? mit[0].gruppe : (g.name || name), beschreibung: g.beschreibung || '', updatedAt: g.updatedAt || null, updatedBy: g.updatedBy || '', mitglieder: mit };
+      });
+    },
+    gruppeSave: function (name, text) {
+      local.gruppen = local.gruppen || {};
+      local.gruppen[name.toLowerCase()] = { name: name, beschreibung: text, updatedAt: Date.now(), updatedBy: officerLabel() };
+      llog('Gruppierung beschrieben', null, name + (text ? '' : ' (Beschreibung gelöscht)'));
+      saveLocal();
+      return Promise.resolve();
+    },
     hbOpen: function () {
       return Promise.resolve(local.haftbefehle.filter(function (h) { return h.status === 'offen'; }).map(LocalStore.hbWithPerson));
     },
@@ -277,6 +304,9 @@
       return api('people/' + encodeURIComponent(id) + '/akte/' + eid, { method: 'DELETE' });
     },
     log: function () { return api('log?limit=300').then(function (d) { return d.log; }); },
+    gruppen: function () { return api('gruppen').then(function (d) { return d.gruppen; }); },
+    gruppe: function (name) { return api('gruppen/' + encodeURIComponent(name)); },
+    gruppeSave: function (name, text) { return api('gruppen/' + encodeURIComponent(name), { method: 'PUT', body: { beschreibung: text } }); },
     hbOpen: function () { return api('haftbefehle?status=offen').then(function (d) { return d.haftbefehle; }); },
     hbForPerson: function (id) { return api('people/' + encodeURIComponent(id) + '/haftbefehle').then(function (d) { return d.haftbefehle; }); },
     hbCreate: function (id, d) {
@@ -297,6 +327,18 @@
   var ui = { edit: null, q: '', sq: '', selId: null, msg: '', busy: false, error: '', createError: '', loading: true, tab: 'personen', hbMsg: '' };
   var hbOpenList = [];   // alle offenen Haftbefehle
   var logList = null;    // Protokoll (null = noch nicht geladen)
+  var gruppenList = null; // Gruppierungen (null = noch nicht geladen)
+  var gruppeData = null;  // geöffnete Gruppierung
+  function loadGruppen() {
+    return store.gruppen().then(function (l) { gruppenList = l; if (ui.tab === 'gruppen') renderResults(); })
+      .catch(function (e) { ui.error = e.message; if (ui.tab === 'gruppen') renderResults(); });
+  }
+  function openGruppe(name) {
+    ui.view = 'gruppe'; ui.gruppe = name; gruppeData = null; closeGruppeForm();
+    renderResults(); renderRecord();
+    return store.gruppe(name).then(function (d) { if (ui.view === 'gruppe' && ui.gruppe === name) { gruppeData = d; renderRecord(); } })
+      .catch(function (e) { gruppeData = { name: name, error: e.message, mitglieder: [] }; renderRecord(); });
+  }
   function officerOk() {
     if (authMode === 'discord') return !!me;
     var o = prefs.officer || {}; return !!(o.name && o.nr);
@@ -334,13 +376,27 @@
     return { q: raw.replace(/^@+/, ''), isAt: raw.charAt(0) === '@' };
   }
   function renderTabs() {
-    [['tabPersonen', 'personen'], ['tabHb', 'hb'], ['tabLog', 'log']].forEach(function (t) {
+    [['tabPersonen', 'personen'], ['tabHb', 'hb'], ['tabGruppen', 'gruppen'], ['tabLog', 'log']].forEach(function (t) {
       var on = ui.tab === t[1];
       $(t[0]).classList.toggle('active', on); $(t[0]).setAttribute('aria-selected', String(on));
     });
     $('hbCount').textContent = hbOpenList.length ? String(hbOpenList.length) : '';
     $('results').hidden = ui.tab !== 'personen'; $('create').hidden = ui.tab !== 'personen';
     $('hbResults').hidden = ui.tab !== 'hb'; $('logResults').hidden = ui.tab !== 'log';
+    $('gruppenResults').hidden = ui.tab !== 'gruppen';
+  }
+  function renderGruppenResults() {
+    var q = ui.q.trim().toLowerCase();
+    if (!gruppenList) { $('count').textContent = 'Wird geladen'; $('gruppenResults').innerHTML = ''; return; }
+    var list = gruppenList.filter(function (g) { return !q || g.name.toLowerCase().indexOf(q) !== -1; });
+    $('count').textContent = list.length + (list.length === 1 ? ' Gruppierung' : ' Gruppierungen');
+    $('gruppenResults').innerHTML = list.length ? list.map(function (g) {
+      var on = ui.view === 'gruppe' && (ui.gruppe || '').toLowerCase() === g.name.toLowerCase();
+      return '<button type="button" class="person' + (on ? ' selected' : '') + '" data-action="open-gruppe" data-gruppe="' + esc(g.name) + '">' +
+        '<span class="avatar">' + esc(initials(g.name)) + '</span>' +
+        '<span class="person-main"><strong>' + esc(g.name) + '</strong></span>' +
+        '<span class="person-count">' + g.count + (g.count === 1 ? ' Mitglied' : ' Mitglieder') + '</span></button>';
+    }).join('') : '<div class="placeholder">Noch keine Gruppierungen. Bei einer Person unter „Beschreibung“ eine Gruppierung eintragen.</div>';
   }
   function renderLogResults() {
     var q = ui.q.trim().toLowerCase().replace(/^@+/, '');
@@ -377,6 +433,7 @@
     renderTabs();
     if (ui.tab === 'hb' && !ui.loading) { renderHbResults(); return; }
     if (ui.tab === 'log' && !ui.loading) { renderLogResults(); return; }
+    if (ui.tab === 'gruppen' && !ui.loading) { renderGruppenResults(); return; }
     var pq = parseQuery(), q = pq.q;
     if (ui.loading) {
       $('count').textContent = 'Wird geladen';
@@ -463,7 +520,42 @@
   function closeInfoForm() {
     $('infoForm').hidden = true; $('infoView').hidden = false; $('infoEditBtn').hidden = false; $('infoError').textContent = '';
   }
+  function closeGruppeForm() {
+    $('gruppeForm').hidden = true; $('gruppeView').hidden = false; $('gruppeError').textContent = '';
+    $('gruppeEditBtn').hidden = !canGruppe();
+  }
+  function renderGruppe() {
+    var d = gruppeData;
+    $('gruppeName').textContent = d ? d.name : ui.gruppe;
+    $('gruppeCount').textContent = d && !d.error ? d.mitglieder.length + (d.mitglieder.length === 1 ? ' Mitglied' : ' Mitglieder') : '';
+    var ok = canGruppe();
+    if ($('gruppeForm').hidden) $('gruppeEditBtn').hidden = !ok;
+    $('gruppeRankNote').hidden = ok;
+    $('gruppeRankNote').textContent = 'Ändern ab A' + ((me && me.gruppeMinRank) || 6) + '.';
+    if (!d) { $('gruppeView').innerHTML = '<span class="empty-note">Wird geladen</span>'; $('gruppeMembers').innerHTML = ''; return; }
+    if (d.error) { $('gruppeView').innerHTML = '<span class="error-msg">' + esc(d.error) + '</span>'; $('gruppeMembers').innerHTML = ''; return; }
+    $('gruppeView').innerHTML = d.beschreibung
+      ? '<p class="info-text gruppe-text">' + esc(d.beschreibung) + '</p>' +
+        (d.updatedBy ? '<span class="muted small">Zuletzt geändert von ' + esc(d.updatedBy) + (d.updatedAt ? ', ' + esc(dateTime(d.updatedAt)) : '') + '</span>' : '')
+      : '<span class="empty-note">Noch keine Beschreibung.</span>';
+    $('gruppeMembers').innerHTML = d.mitglieder.length ? d.mitglieder.map(function (p) {
+      return '<button type="button" class="person" data-action="select" data-id="' + esc(p.id) + '">' +
+        '<span class="avatar">' + avatarHtml(p) + '</span>' +
+        '<span class="person-main"><strong>' + esc(p.name) + '</strong><span>@' + esc(p.roblox) + '  ' + esc(p.id) + '</span></span>' +
+        '<span class="person-count">' + esc(p.gruppeRang || 'ohne Rang') + '</span>' +
+        (p.haftbefehle ? '<span class="person-hb">Haftbefehl</span>' : '') +
+        '<span class="chip ' + chipClass(p.status) + '">' + esc(p.status) + '</span></button>';
+    }).join('') : '<span class="empty-note">Keine Mitglieder eingetragen.</span>';
+  }
   function renderRecord() {
+    var gv = ui.view === 'gruppe';
+    $('gruppeBox').hidden = !gv;
+    $('record').hidden = gv; $('history').hidden = gv;
+    if (gv) {
+      ['infoBox', 'hbBox', 'strafeBox', 'adminBox'].forEach(function (id) { $(id).hidden = true; });
+      renderGruppe();
+      return;
+    }
     renderAdmin();
     renderInfo();
     var box = $('record'), hist = $('history');
@@ -805,6 +897,7 @@
     var a = el.dataset.action;
 
     if (a === 'select') {
+      ui.view = 'person';
       if (ui.selId !== el.dataset.id) closeHbForm();
       ui.edit = null;
       ui.selId = el.dataset.id; ui.msg = ''; ui.error = ''; ui.hbMsg = '';
@@ -833,8 +926,9 @@
     } else if (a === 'all-done') {
       var p2 = findPerson(ui.selId);
       if (p2 && !ui.busy) run(p2, store.allDone(p2.id), '');
-    } else if (a === 'find-gruppe') {
-      ui.tab = 'personen'; ui.q = el.dataset.gruppe; $('q').value = ui.q; renderResults();
+    } else if (a === 'find-gruppe' || a === 'open-gruppe') {
+      if (a === 'find-gruppe') { ui.tab = 'gruppen'; ui.q = ''; $('q').value = ''; if (!gruppenList) loadGruppen(); }
+      openGruppe(el.dataset.gruppe);
     } else if (a === 'adjust') {
       var pa = findPerson(ui.selId);
       var ea = pa && (akten[pa.id] || []).find(function (x) { return x.id === Number(el.dataset.eid); });
@@ -901,6 +995,25 @@
   $('tabPersonen').addEventListener('click', function () { ui.tab = 'personen'; renderResults(); });
   $('tabHb').addEventListener('click', function () { ui.tab = 'hb'; renderResults(); });
   $('tabLog').addEventListener('click', function () { ui.tab = 'log'; renderResults(); loadLog(); });
+  $('tabGruppen').addEventListener('click', function () { ui.tab = 'gruppen'; renderResults(); loadGruppen(); });
+  $('gruppeEditBtn').addEventListener('click', function (ev) {
+    if (blockIfNoOfficer(ev) || !gruppeData || gruppeData.error) return;
+    $('gruppeText').value = gruppeData.beschreibung || '';
+    $('gruppeForm').hidden = false; $('gruppeView').hidden = true; $('gruppeEditBtn').hidden = true;
+    $('gruppeText').focus();
+  });
+  $('gruppeCancel').addEventListener('click', closeGruppeForm);
+  $('gruppeForm').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    if (blockIfNoOfficer(ev) || !gruppeData) return;
+    var name = gruppeData.name, btn = $('gruppeForm').querySelector('[type="submit"]');
+    btn.disabled = true;
+    store.gruppeSave(name, $('gruppeText').value.trim()).then(function () {
+      btn.disabled = false; closeGruppeForm();
+      openGruppe(name); loadGruppen();
+      if (ui.tab === 'log') loadLog();
+    }).catch(function (e) { btn.disabled = false; $('gruppeError').textContent = e.message; });
+  });
   $('hbNewBtn').addEventListener('click', function () {
     $('hbForm').hidden = false; $('hbNewBtn').hidden = true; $('hbFormError').textContent = '';
     $('hbGrund').focus();
@@ -961,7 +1074,7 @@
     store.update(p.id, patch).then(function (np) {
       btn.disabled = false;
       Object.assign(p, { gruppe: np.gruppe, gruppeRang: np.gruppeRang, beschreibung: np.beschreibung });
-      closeInfoForm(); renderResults(); renderRecord();
+      closeInfoForm(); gruppenList = null; if (ui.tab === 'gruppen') loadGruppen(); renderResults(); renderRecord();
       if (ui.tab === 'log') loadLog();
     }).catch(function (e) { btn.disabled = false; $('infoError').textContent = e.message; });
   });
@@ -1011,6 +1124,8 @@
     if (mode === 'server' && !document.hidden && $('gate').hidden && $('discordGate').hidden) {
       if (!ui.edit && $('infoForm').hidden) { refreshPeople(); if (ui.selId) { loadAkte(ui.selId, true); loadHb(ui.selId); } }
       if (ui.tab === 'log') loadLog();
+      if (ui.tab === 'gruppen') loadGruppen();
+      if (ui.view === 'gruppe' && $('gruppeForm').hidden) store.gruppe(ui.gruppe).then(function (d) { if (ui.view === 'gruppe') { gruppeData = d; renderRecord(); } }).catch(function () {});
       if (authMode === 'discord') api('me').then(function (m) { me = m; isAdmin = !!m.admin; renderMe(); renderRecord(); }).catch(function () {});
     }
   }, 20000);

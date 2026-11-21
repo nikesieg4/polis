@@ -309,3 +309,12 @@ body.no-officer #hbNewBtn { opacity: 0.45; cursor: not-allowed; }
   min-height: 90px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--field);
   background: var(--card); color: var(--text); font-size: 14px; font-family: inherit; resize: vertical;
 }
+
+/* Gruppierungen */
+.gruppe-title { font-size: 20px; font-weight: 700; }
+.gruppe-text { margin: 0; font-size: 14px; line-height: 1.55; color: var(--text-2); }
+#gruppeText {
+  min-height: 140px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--field);
+  background: var(--card); color: var(--text); font-size: 14px; font-family: inherit; resize: vertical;
+}
+#gruppeMembers { max-height: none; min-height: 0; }
