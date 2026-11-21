@@ -7,7 +7,7 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 ## Funktionen
 - **Schicht** (links): Dienstzeit starten, pausieren und beenden, mit Übersicht für heute und die Woche (pro Browser gespeichert)
 - **Personensuche** (Mitte): Suche nach RP-Name, Personen-ID oder `@RobloxName`. Unbekannte Spieler lassen sich direkt erfassen; der Account wird bei Roblox geprüft und der Avatar angezeigt.
-- **Strafregister** (rechts): Einträge pro Person mit Summen für Geldstrafen und Haftzeit, neue Strafen aus dem Strafkatalog, Status und Gefährlich-Markierung
+- **Strafregister** (rechts): Einträge pro Person mit Summen für Geldstrafen und Haftzeit, Status und Gefährlich-Markierung. Neue Strafen nach dem Strafgesetzbuch (§ 1–10); Geldstrafe und Haftzeit wählt der Beamte innerhalb der Spanne des Paragraphen (`KATALOG` in `app.js`).
 - **Geplant:** Fahrzeuge, Haftbefehle, Einsatzberichte, Lizenzen
 
 ## Hosting

@@ -8,15 +8,29 @@
   var KEY_STORE = 'polis.key';
   var PREFS_KEY = 'polis.prefs';
 
+  // Strafgesetzbuch Berlin City Roleplay – Spannen: [min, max]
   var KATALOG = [
-    { id: 'k1', name: 'Geschwindigkeitsüberschreitung', geld: 1500, haft: 0 },
-    { id: 'k2', name: 'Fahren ohne Fahrerlaubnis', geld: 3000, haft: 5 },
-    { id: 'k3', name: 'Fahrerflucht', geld: 4500, haft: 10 },
-    { id: 'k4', name: 'Widerstand gg. Beamte', geld: 2500, haft: 15 },
-    { id: 'k5', name: 'Illegaler Waffenbesitz', geld: 10000, haft: 20 },
-    { id: 'k6', name: 'Raubüberfall', geld: 8000, haft: 25 },
-    { id: 'k7', name: 'Banküberfall', geld: 15000, haft: 40 }
+    { id: 'p1', group: 'Straftaten gegen das Leben & die Person', para: '§ 1', name: 'Körperverletzung', geld: [2000, 5000], haft: [10, 20] },
+    { id: 'p2', group: 'Straftaten gegen das Leben & die Person', para: '§ 2', name: 'Versuchter / Vollendeter Totschlag / Mord', geld: [15000, 30000], haft: [30, 60] },
+    { id: 'p3', group: 'Straftaten gegen das Leben & die Person', para: '§ 3', name: 'Geiselnahme / Entführung', geld: [10000, 20000], haft: [25, 45] },
+    { id: 'p4', group: 'Straftaten gegen die Staatsgewalt', para: '§ 4', name: 'Widerstand gegen Vollstreckungsbeamte', geld: [3000, 7000], haft: [15, 25] },
+    { id: 'p5', group: 'Straftaten gegen die Staatsgewalt', para: '§ 5', name: 'Amtsanmaßung', geld: [5000, 10000], haft: [15, 30] },
+    { id: 'p6', group: 'Straftaten gegen die Staatsgewalt', para: '§ 6', name: 'Bestechung / Korruption', geld: [8000, 15000], haft: [20, 35] },
+    { id: 'p7', group: 'Eigentums- & Vermögensdelikte', para: '§ 7', name: 'Diebstahl & Raub', geld: [4000, 10000], haft: [15, 30] },
+    { id: 'p8', group: 'Eigentums- & Vermögensdelikte', para: '§ 8', name: 'Laden- & Bankraub', geld: [12000, 25000], haft: [30, 50] },
+    { id: 'p9', group: 'Betäubungsmittel & Waffen', para: '§ 9', name: 'Drogenbesitz & -handel', geld: [3000, 12000], haft: [10, 30] },
+    { id: 'p10', group: 'Betäubungsmittel & Waffen', para: '§ 10', name: 'Verstoß gegen das Waffengesetz', geld: [6000, 15000], haft: [20, 40] }
   ];
+  function rangeText(c) {
+    return euro(c.geld[0]) + '–' + euro(c.geld[1]) + ' · ' + c.haft[0] + '–' + c.haft[1] + ' Min.';
+  }
+  function clampInt(v, r) { v = Math.round(Number(v)); if (!isFinite(v)) v = r[0]; return Math.min(r[1], Math.max(r[0], v)); }
+  function pickedCharges() {
+    return KATALOG.filter(function (c) { return ui.checked[c.id]; }).map(function (c) {
+      var v = ui.checked[c.id];
+      return { c: c, geld: v.geld, haft: v.haft };
+    });
+  }
   var STATUSES = ['Sauber', 'Bewährung', 'Fahndung'];
 
   // ---------- Helfer ----------
@@ -82,10 +96,10 @@
         { id: 'P-1082', name: 'Aylin Demir', roblox: 'aylin.dmr', status: 'Sauber', danger: false }
       ],
       akten: {
-        'P-1042': [e('Raubüberfall', 8000, 25, '18.11.2026'), e('Fahrerflucht', 4500, 10, '21.10.2026'), e('Widerstand gg. Beamte', 2500, 15, '03.10.2026')],
-        'P-1051': [e('Fahren ohne Fahrerlaubnis', 3000, 5, '19.11.2026'), e('Geschwindigkeitsüberschreitung', 1500, 0, '02.11.2026')],
-        'P-1077': [e('Banküberfall', 15000, 40, '19.11.2026'), e('Illegaler Waffenbesitz', 10000, 20, '28.10.2026')],
-        'P-1082': [e('Geschwindigkeitsüberschreitung', 1500, 0, '18.11.2026')]
+        'P-1042': [e('§ 7 Diebstahl & Raub', 8000, 25, '18.11.2026'), e('§ 4 Widerstand gegen Vollstreckungsbeamte', 4000, 15, '03.10.2026')],
+        'P-1051': [e('§ 9 Drogenbesitz & -handel', 3000, 10, '19.11.2026')],
+        'P-1077': [e('§ 8 Laden- & Bankraub', 20000, 40, '19.11.2026'), e('§ 10 Verstoß gegen das Waffengesetz', 10000, 25, '28.10.2026')],
+        'P-1082': [e('§ 1 Körperverletzung', 2000, 10, '18.11.2026')]
       }
     };
   }
@@ -271,9 +285,24 @@
     akte = akte || [];
     var geld = akte.reduce(function (a, e) { return a + e.geld; }, 0);
     var haft = akte.reduce(function (a, e) { return a + e.haft; }, 0);
-    var picked = KATALOG.filter(function (c) { return ui.checked[c.id]; });
-    var sGeld = picked.reduce(function (a, c) { return a + c.geld; }, 0);
-    var sHaft = picked.reduce(function (a, c) { return a + c.haft; }, 0);
+    var picked = pickedCharges();
+    var sGeld = picked.reduce(function (a, x) { return a + x.geld; }, 0);
+    var sHaft = picked.reduce(function (a, x) { return a + x.haft; }, 0);
+    var lastGroup = '';
+    var catalogHtml = KATALOG.map(function (c) {
+      var v = ui.checked[c.id];
+      var head = '';
+      if (c.group !== lastGroup) { lastGroup = c.group; head = '<h4 class="cat-group">' + esc(c.group) + '</h4>'; }
+      return head + '<div class="charge-wrap' + (v ? ' on' : '') + '">' +
+        '<label class="charge"><input type="checkbox" data-action="charge" data-id="' + c.id + '"' + (v ? ' checked' : '') + '>' +
+        '<span class="name"><span class="para">' + esc(c.para) + '</span> ' + esc(c.name) + '</span>' +
+        '<span class="price">' + esc(rangeText(c)) + '</span></label>' +
+        (v ? '<div class="amounts">' +
+          '<label>Geldstrafe (€)<input type="number" inputmode="numeric" data-action="amt" data-field="geld" data-id="' + c.id + '" min="' + c.geld[0] + '" max="' + c.geld[1] + '" step="500" value="' + v.geld + '"></label>' +
+          '<label>Haft (Min.)<input type="number" inputmode="numeric" data-action="amt" data-field="haft" data-id="' + c.id + '" min="' + c.haft[0] + '" max="' + c.haft[1] + '" step="1" value="' + v.haft + '"></label>' +
+        '</div>' : '') +
+      '</div>';
+    }).join('');
 
     box.innerHTML =
       '<section class="card flush">' +
@@ -304,11 +333,8 @@
       '</section>' +
       '<section class="card">' +
         '<h2>Strafe eintragen</h2>' +
-        '<div class="catalog">' + KATALOG.map(function (c) {
-          var on = !!ui.checked[c.id];
-          return '<label class="charge' + (on ? ' on' : '') + '"><input type="checkbox" data-action="charge" data-id="' + c.id + '"' + (on ? ' checked' : '') + '>' +
-            '<span class="name">' + esc(c.name) + '</span><span class="price">' + esc(strafeText(c)) + '</span></label>';
-        }).join('') + '</div>' +
+        '<div class="catalog">' + catalogHtml + '</div>' +
+        '<p class="hint">Das Strafmaß liegt im Ermessen der zuständigen Beamten und kann bei Einsicht angepasst werden.</p>' +
         '<div class="sum"><span class="muted" style="font-size:13px">Summe</span><span>' + (picked.length ? euro(sGeld) + ' · ' + sHaft + ' Min. Haft' : '–') + '</span></div>' +
         '<button type="button" class="btn btn-primary full" data-action="add"' + (picked.length && !ui.busy ? '' : ' disabled') + '>' + (ui.busy ? 'Speichere …' : 'Ins Strafregister eintragen') + '</button>' +
         (ui.saved ? '<span class="saved" role="status">Eintrag gespeichert.</span>' : '') +
@@ -397,10 +423,12 @@
       }).catch(function (e) { ui.busy = false; ui.createError = e.message; renderResults(); });
     } else if (a === 'add') {
       var p = findPerson(ui.selId);
-      var picked = KATALOG.filter(function (c) { return ui.checked[c.id]; });
+      var picked = pickedCharges();
       if (!p || !picked.length || ui.busy) return;
       ui.busy = true; ui.error = ''; renderRecord();
-      store.addEntries(p.id, picked.map(function (c) { return { delikt: c.name, geld: c.geld, haft: c.haft }; }))
+      store.addEntries(p.id, picked.map(function (x) {
+        return { delikt: x.c.para + ' ' + x.c.name, geld: clampInt(x.geld, x.c.geld), haft: clampInt(x.haft, x.c.haft) };
+      }))
         .then(function () {
           ui.busy = false; ui.checked = {}; ui.saved = true;
           return loadAkte(p.id, true).then(function () {
@@ -417,7 +445,17 @@
     var a = el.dataset && el.dataset.action;
     var p = findPerson(ui.selId);
     if (a === 'charge') {
-      ui.checked[el.dataset.id] = el.checked; ui.saved = false; renderRecord();
+      var c = KATALOG.find(function (k) { return k.id === el.dataset.id; });
+      if (el.checked && c) ui.checked[c.id] = { geld: c.geld[0], haft: c.haft[0] };
+      else delete ui.checked[el.dataset.id];
+      ui.saved = false; renderRecord();
+    } else if (a === 'amt') {
+      var k = KATALOG.find(function (x) { return x.id === el.dataset.id; });
+      var cur = ui.checked[el.dataset.id];
+      if (k && cur) {
+        cur[el.dataset.field] = clampInt(el.value, k[el.dataset.field]);
+        ui.saved = false; renderRecord();
+      }
     } else if ((a === 'status' || a === 'danger') && p) {
       var patch = a === 'status' ? { status: el.value } : { danger: el.checked };
       var before = { status: p.status, danger: p.danger };
