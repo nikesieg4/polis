@@ -626,7 +626,8 @@
 
     box.innerHTML =
       '<section class="card flush">' +
-        (p.kripo ? '<div class="alert alert-kripo" role="alert">KRIPO' + (p.kripoHinweis ? ': ' + esc(p.kripoHinweis) : '') + '</div>' : '') +
+        (p.kripo ? '<div class="alert alert-kripo" role="alert"><span class="alert-title">KRIPO</span>' +
+          (p.kripoHinweis ? '<span class="alert-sub">' + esc(p.kripoHinweis) + '</span>' : '') + '</div>' : '') +
         (p.haftbefehle ? '<div class="alert alert-hb" role="alert">OFFENER HAFTBEFEHL</div>' : '') +
         (p.danger ? '<div class="alert" role="alert">GEFÄHRLICH</div>' : '') +
         '<div class="record-body">' +
@@ -1084,7 +1085,7 @@
   }
 
   // ---------- Vorschläge beim Tippen (Personensuche) ----------
-  var sug = { items: [], active: -1, timer: null, seq: 0, roblox: [], q: '' };
+  var sug = { items: [], active: -1, timer: null, seq: 0, roblox: [], q: '', zu: false }; // zu = vom Nutzer geschlossen
   function sugAvatar(url, name) {
     return '<span class="avatar sug-avatar">' + (url ? '<img src="' + esc(url) + '" alt="" loading="lazy">' : esc(initials(name))) + '</span>';
   }
@@ -1159,15 +1160,16 @@
     sug.timer = setTimeout(function () {
       api('roblox/suche?q=' + encodeURIComponent(q)).then(function (d) {
         if (my !== sug.seq) return; // inzwischen weitergetippt
-        sug.q = q; sug.roblox = d.accounts || []; sug.quelle = d.quelle || ''; renderSuggest();
-      }).catch(function () { if (my === sug.seq) { sug.q = q; sug.roblox = []; renderSuggest(); } });
+        sug.q = q; sug.roblox = d.accounts || []; sug.quelle = d.quelle || '';
+        if (!sug.zu && document.activeElement === $('q')) renderSuggest();
+      }).catch(function () { if (my === sug.seq) { sug.q = q; sug.roblox = []; if (!sug.zu && document.activeElement === $('q')) renderSuggest(); } });
     }, 300);
   }
   $('suggest').addEventListener('mousedown', function (ev) {
     var el = ev.target.closest('.sug-item'); if (!el) return;
     ev.preventDefault(); pickSuggest(Number(el.dataset.i));
   });
-  $('q').addEventListener('input', querySuggest);
+  $('q').addEventListener('input', function () { sug.zu = false; querySuggest(); });
   $('q').addEventListener('focus', renderSuggest);
   $('q').addEventListener('blur', function () { setTimeout(closeSuggest, 150); });
 
@@ -1190,7 +1192,7 @@
     var open = !$('suggest').hidden && sug.items.length;
     if (ev.key === 'ArrowDown' && open) { ev.preventDefault(); sug.active = (sug.active + 1) % sug.items.length; markActive(); return; }
     if (ev.key === 'ArrowUp' && open) { ev.preventDefault(); sug.active = sug.active <= 0 ? sug.items.length - 1 : sug.active - 1; markActive(); return; }
-    if (ev.key === 'Escape' && open) { closeSuggest(); return; }
+    if (ev.key === 'Escape') { sug.zu = true; closeSuggest(); return; }
     if (ev.key === 'Enter') {
       if (open && sug.active >= 0) { ev.preventDefault(); pickSuggest(sug.active); return; }
       var btn = $('create').querySelector('[data-action="create"]');
