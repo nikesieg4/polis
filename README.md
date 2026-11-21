@@ -29,11 +29,9 @@ Einrichtung:
 1. [Discord Developer Portal](https://discord.com/developers/applications) → *New Application*.
 2. **OAuth2** → *Redirects* → `https://<deine-worker-adresse>/api/auth/discord/callback` eintragen (genau so, mit `https`).
 3. **Bot** → *Reset Token* → Token kopieren. Bot auf den Server einladen: OAuth2 → URL Generator → Scope `bot`, keine Rechte → Link öffnen.
-4. Im Worker unter Settings → Variables and Secrets als **Secret** anlegen:
-   - `DISCORD_CLIENT_ID` (OAuth2 → Client ID)
+4. `DISCORD_CLIENT_ID` und `DISCORD_GUILD_ID` stehen in `wrangler.jsonc` unter `vars` (nicht geheim). Im Worker unter Settings → Variables and Secrets nur noch als **Secret** anlegen:
    - `DISCORD_CLIENT_SECRET` (OAuth2 → Client Secret)
    - `DISCORD_BOT_TOKEN`
-   - `DISCORD_GUILD_ID` (Rechtsklick auf den Server → Server-ID kopieren, Entwicklermodus nötig)
 
    Rollen-IDs sind nicht nötig, die Rollen werden über ihre Namen (A1 … A10, Datenbank Admin) erkannt.
 5. Neu deployen.
