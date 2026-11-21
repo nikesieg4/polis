@@ -465,6 +465,7 @@
         '<span class="avatar">' + avatarHtml(p) + '</span>' +
         '<span class="person-main"><strong>' + esc(p.name) + '</strong><span>@' + esc(p.roblox) + '  ' + esc(p.id) +
           (p.gruppe ? '  ' + esc(p.gruppe) + (p.gruppeRang ? ' (' + esc(p.gruppeRang) + ')' : '') : '') + '</span></span>' +
+(p.kripo ? '<span class="person-kripo" title="' + esc(p.kripoHinweis || 'Kripo') + '">Kripo</span>' : '') +
         (p.haftbefehle ? '<span class="person-hb">Haftbefehl</span>' : '') +
         (p.offen ? '<span class="person-open">ausstehend</span>' : '<span class="person-count">' + (p.count || 0) + (p.count === 1 ? ' Eintrag' : ' Einträge') + '</span>') +
         '<span class="chip ' + chipClass(p.status) + '">' + esc(p.status) + '</span></button>';
@@ -506,6 +507,30 @@
       $('admName').value = p.name; $('admRoblox').value = p.roblox; $('admMsg').textContent = '';
     }
   }
+  function renderKripo() {
+    var p = findPerson(ui.selId);
+    var box = $('kripoBox');
+    box.hidden = !p || !has('kripo_setzen');
+    if (box.hidden) { box.dataset.pid = ''; return; }
+    if (box.dataset.pid !== p.id) {
+      box.dataset.pid = p.id;
+      $('kripoAktiv').checked = !!p.kripo; $('kripoHinweis').value = p.kripoHinweis || ''; $('kripoMsg').textContent = '';
+    }
+  }
+  $('kripoSave').addEventListener('click', function (ev) {
+    if (blockIfNoOfficer(ev)) return;
+    var p = findPerson(ui.selId);
+    if (!p) return;
+    $('kripoSave').disabled = true;
+    api('people/' + encodeURIComponent(p.id) + '/kripo', { method: 'PUT', body: { aktiv: $('kripoAktiv').checked, hinweis: $('kripoHinweis').value.trim() } })
+      .then(function (d) {
+        $('kripoSave').disabled = false;
+        p.kripo = !!d.person.kripo; p.kripoHinweis = d.person.kripoHinweis || '';
+        $('kripoMsg').textContent = p.kripo ? 'Markierung gespeichert.' : 'Markierung entfernt.';
+        renderResults(); renderRecord();
+        if (ui.tab === 'log') loadLog();
+      }).catch(function (e) { $('kripoSave').disabled = false; $('kripoMsg').textContent = e.message; });
+  });
   function renderInfo() {
     var p = findPerson(ui.selId);
     var box = $('infoBox');
@@ -559,6 +584,7 @@
         '<span class="avatar">' + avatarHtml(p) + '</span>' +
         '<span class="person-main"><strong>' + esc(p.name) + '</strong><span>@' + esc(p.roblox) + '  ' + esc(p.id) + '</span></span>' +
         '<span class="person-count">' + esc(p.gruppeRang || 'ohne Rang') + '</span>' +
+(p.kripo ? '<span class="person-kripo" title="' + esc(p.kripoHinweis || 'Kripo') + '">Kripo</span>' : '') +
         (p.haftbefehle ? '<span class="person-hb">Haftbefehl</span>' : '') +
         '<span class="chip ' + chipClass(p.status) + '">' + esc(p.status) + '</span></button>';
     }).join('') : '<span class="empty-note">Keine Mitglieder eingetragen.</span>';
@@ -568,12 +594,13 @@
     $('gruppeBox').hidden = !gv;
     $('record').hidden = gv; $('history').hidden = gv;
     if (gv) {
-      ['infoBox', 'hbBox', 'strafeBox', 'adminBox'].forEach(function (id) { $(id).hidden = true; });
+      ['infoBox', 'hbBox', 'strafeBox', 'adminBox', 'kripoBox'].forEach(function (id) { $(id).hidden = true; });
       renderGruppe();
       return;
     }
     renderAdmin();
     renderInfo();
+    renderKripo();
     var box = $('record'), hist = $('history');
     var p = findPerson(ui.selId);
     $('strafeBox').hidden = !p || !has('strafen');
@@ -599,6 +626,7 @@
 
     box.innerHTML =
       '<section class="card flush">' +
+        (p.kripo ? '<div class="alert alert-kripo" role="alert">KRIPO' + (p.kripoHinweis ? ': ' + esc(p.kripoHinweis) : '') + '</div>' : '') +
         (p.haftbefehle ? '<div class="alert alert-hb" role="alert">OFFENER HAFTBEFEHL</div>' : '') +
         (p.danger ? '<div class="alert" role="alert">GEFÄHRLICH</div>' : '') +
         '<div class="record-body">' +

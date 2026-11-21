@@ -148,9 +148,11 @@ async function ensureSchema(db) {
   await db.batch(SCHEMA.map((s) => db.prepare(s)));
   // Ältere Datenbanken: Spalte „erledigt“ nachrüsten
   try { await db.prepare('ALTER TABLE akte ADD COLUMN erledigt INTEGER NOT NULL DEFAULT 0').run(); } catch { /* existiert schon */ }
-  for (const c of ['gruppe TEXT', 'gruppe_rang TEXT', 'beschreibung TEXT']) {
+  for (const c of ['gruppe TEXT', 'gruppe_rang TEXT', 'beschreibung TEXT', 'kripo INTEGER NOT NULL DEFAULT 0', 'kripo_hinweis TEXT', 'kripo_von TEXT']) {
     try { await db.prepare('ALTER TABLE people ADD COLUMN ' + c).run(); } catch { /* existiert schon */ }
   }
+  // Protokolleinträge, die nur sehen darf, wer die Kripo-Markierung sehen darf
+  try { await db.prepare('ALTER TABLE log ADD COLUMN geheim INTEGER NOT NULL DEFAULT 0').run(); } catch { /* existiert schon */ }
   for (const m of MEMBER_MIGRATIONS) { try { await db.prepare(m).run(); } catch { /* existiert schon */ } }
   schemaReady = true;
 }
@@ -271,9 +273,15 @@ export async function onRequest(context) {
   const deny = (k) => fail(403, 'Dafür fehlt dir das Recht „' + (PERMS.find((p) => p.key === k) || { label: k }).label + '“.');
   const needAdmin = () => deny('admin');
   const beamter = officer.name + ' (' + officer.nr + ')';
-  const logIt = (aktion, personNum, details) => db.prepare(
-    'INSERT INTO log (ts, beamter_name, beamter_nr, aktion, person_num, details) VALUES (?, ?, ?, ?, ?, ?)'
-  ).bind(Date.now(), officer.name, officer.nr, aktion, personNum ?? null, clean(details, 300) || null);
+  const logIt = (aktion, personNum, details, geheim) => db.prepare(
+    'INSERT INTO log (ts, beamter_name, beamter_nr, aktion, person_num, details, geheim) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).bind(Date.now(), officer.name, officer.nr, aktion, personNum ?? null, clean(details, 300) || null, geheim ? 1 : 0);
+  // Person nach außen; die Kripo-Markierung nur an Beamte mit Recht „kripo_sehen“
+  const pOut = (r) => {
+    const o = personOut(r);
+    if (can('kripo_sehen') && r.kripo) { o.kripo = true; o.kripoHinweis = r.kripo_hinweis || ''; o.kripoVon = r.kripo_von || ''; }
+    return o;
+  };
 
   // GET /api/admin – Admin-Passwort prüfen
   if (route === 'admin' && method === 'GET') {
@@ -287,9 +295,10 @@ export async function onRequest(context) {
     const sp = new URL(request.url).searchParams;
     const limit = Math.min(500, Math.max(1, Number(sp.get('limit')) || 200));
     const pnum = parseId(sp.get('person'));
-    const base = `SELECT l.*, p.name AS p_name, p.roblox AS p_roblox FROM log l LEFT JOIN people p ON p.num = l.person_num`;
+    const base = `SELECT l.*, p.name AS p_name, p.roblox AS p_roblox FROM log l LEFT JOIN people p ON p.num = l.person_num WHERE `
+      + (can('kripo_sehen') ? '1 = 1' : 'l.geheim = 0');
     const q = pnum != null
-      ? db.prepare(base + ' WHERE l.person_num = ? ORDER BY l.id DESC LIMIT ?').bind(pnum, limit)
+      ? db.prepare(base + ' AND l.person_num = ? ORDER BY l.id DESC LIMIT ?').bind(pnum, limit)
       : db.prepare(base + ' ORDER BY l.id DESC LIMIT ?').bind(limit);
     const { results } = await q.all();
     return json({ log: results.map((r) => ({
@@ -366,7 +375,7 @@ export async function onRequest(context) {
       beschreibung: (g && g.beschreibung) || '',
       updatedAt: g ? g.updated_at : null,
       updatedBy: (g && g.updated_by) || '',
-      mitglieder: results.map(personOut)
+      mitglieder: results.map((r) => pOut(r))
     });
   }
 
@@ -438,7 +447,7 @@ export async function onRequest(context) {
                 (SELECT COUNT(*) FROM haftbefehle h WHERE h.person_num = p.num AND h.status = 'offen') AS hb
            FROM people p ORDER BY p.num DESC`
       ).all();
-      return json({ people: results.map(personOut) });
+      return json({ people: results.map((r) => pOut(r)) });
     }
 
     // POST /api/people  { roblox, name, beamter }
@@ -448,19 +457,19 @@ export async function onRequest(context) {
       const handle = clean(b.roblox, 30).replace(/^@+/, '');
       if (!HANDLE_RE.test(handle)) return fail(400, 'Ungültiger Roblox-Name.');
       const existing = await db.prepare('SELECT * FROM people WHERE roblox = ?').bind(handle).first();
-      if (existing) return json({ person: personOut(existing), existed: true });
+      if (existing) return json({ person: pOut(existing), existed: true });
       let u;
       try { u = await robloxLookup(handle); } catch { return fail(502, 'Roblox ist gerade nicht erreichbar.'); }
       if (!u) return fail(404, `Es gibt keinen Roblox-Account „@${handle}“.`);
       const dupe = await db.prepare('SELECT * FROM people WHERE roblox = ? OR roblox_id = ?').bind(u.name, u.id).first();
-      if (dupe) return json({ person: personOut(dupe), existed: true });
+      if (dupe) return json({ person: pOut(dupe), existed: true });
       const name = clean(b.name, 60) || u.displayName || u.name;
       const row = await db.prepare(
         `INSERT INTO people (name, roblox, roblox_id, status, danger, created_at, created_by)
          VALUES (?, ?, ?, 'Sauber', 0, ?, ?) RETURNING *`
       ).bind(name, u.name, u.id, Date.now(), beamter).first();
       await logIt('Person angelegt', row.num, '@' + u.name + (name !== u.name ? ' als ' + name : '')).run();
-      return json({ person: personOut(row) }, 201);
+      return json({ person: pOut(row) }, 201);
     }
 
     const num = parseId(parts[1]);
@@ -509,7 +518,7 @@ export async function onRequest(context) {
       if (roblox !== person.roblox) changes.push('Roblox: @' + person.roblox + ' zu @' + roblox);
       const adminEdit = name !== person.name || roblox !== person.roblox;
       if (changes.length) await logIt(adminEdit ? 'Person bearbeitet (Admin)' : 'Person geändert', num, changes.join(', ')).run();
-      return json({ person: personOut(row) });
+      return json({ person: pOut(row) });
     }
 
     // DELETE /api/people/:id  (Admin) – Person mit Strafregister und Haftbefehlen löschen
@@ -522,6 +531,22 @@ export async function onRequest(context) {
         logIt('Person gelöscht (Admin)', null, person.name + ' (@' + person.roblox + ', P-' + (1000 + num) + ')')
       ]);
       return json({ ok: true });
+    }
+
+    // PUT /api/people/:id/kripo  { aktiv, hinweis }  –  Kripo-Markierung (Recht „kripo_setzen“)
+    if (parts.length === 3 && parts[2] === 'kripo' && method === 'PUT') {
+      if (!can('kripo_setzen')) return deny('kripo_setzen');
+      const b = await readBody(request);
+      const aktiv = b.aktiv === true;
+      const hinweis = aktiv ? clean(b.hinweis, 200) : '';
+      const aktion = !aktiv ? 'Kripo-Markierung entfernt' : person.kripo ? 'Kripo-Markierung geändert' : 'Kripo-Markierung gesetzt';
+      if (!aktiv && !person.kripo) return json({ person: pOut(person) });
+      await db.batch([
+        db.prepare('UPDATE people SET kripo = ?, kripo_hinweis = ?, kripo_von = ? WHERE num = ?').bind(aktiv ? 1 : 0, hinweis || null, aktiv ? beamter : null, num),
+        logIt(aktion, num, hinweis, true)
+      ]);
+      const row = await db.prepare('SELECT * FROM people WHERE num = ?').bind(num).first();
+      return json({ person: pOut(row) });
     }
 
     // GET /api/people/:id/haftbefehle

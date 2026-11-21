@@ -10,6 +10,7 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 
 - **Beschreibung** pro Person: Gruppierung (z. B. Kartell), Rang in der Gruppierung und freier Text. Jeder Beamte darf sie ändern, Änderungen stehen im Protokoll. Die Personensuche findet auch Gruppierungen; ein Klick auf die Gruppierung zeigt alle Mitglieder.
 - **Gruppierungen** (Tab links): alle Gruppierungen mit Mitgliederzahl; die Seite einer Gruppierung zeigt ihre Beschreibung und alle Mitglieder mit Rang. Die Beschreibung der Gruppierung dürfen nur A6 und höher sowie Datenbank Admin ändern (`POLIS_GRUPPE_MIN_RANK`, Standard 6).
+- **Kripo-Markierung**: Eine Person (z. B. verdeckt in einer Gruppierung) kann als Kripo-Mitglied markiert werden, mit Hinweis für Polizisten. Sichtbar als lila Balken „KRIPO“ in der Akte und als „Kripo“ in Personenliste und Gruppierung. Rechte „Kripo-Markierung sehen“ und „Kripo-Markierung setzen“; ohne Sehen-Recht liefert der Server die Markierung und die zugehörigen Protokolleinträge gar nicht aus.
 - **Haftbefehle**: bei der Person ausstellen (Kennzeichen, Auto Modell, Grund, Beweise; ausgestellt von = eigener Name). Offene Haftbefehle stehen im Tab „Haftbefehle“ und als roter Balken bei der Person. Status: offen, vollstreckt, aufgehoben. „Für Discord kopieren“ erzeugt den Text im Discord-Format; der Teamtag pingt die Rolle @Präsidium-Team (`TEAMTAG` in `app.js`, Rollen-ID 1476650119700156618).
 
 - **Protokoll**: Jede Änderung (Person angelegt/geändert, Strafe vergeben/erledigt/entfernt, Haftbefehl ausgestellt/vollstreckt/aufgehoben) wird mit Name, Dienstnummer und Uhrzeit gespeichert und ist im Tab „Protokoll“ durchsuchbar. Ohne Name und Dienstnummer oben kann man nichts eintragen; die API lehnt Änderungen ohne die Header `x-polis-name` und `x-polis-nr` ab.
@@ -66,6 +67,7 @@ Mit Discord-Anmeldung: Sitzungs-Cookie `polis_session` (über `/api/auth/discord
 | POST | `/api/people/:id/akte` | Strafe vergeben (`entries: [{ para: "§ 8" }]`), Beträge werden auf die Spanne des Paragraphen begrenzt |
 | PATCH | `/api/people/:id/akte` | `{ erledigt: true }`: alle ausstehenden Strafen erledigt |
 | PATCH / DELETE | `/api/people/:id/akte/:eintrag` | `{ erledigt }` erledigen, `{ geld, haft }` anpassen (auf die Spanne begrenzt) / ausstehenden Eintrag löschen |
+| PUT | `/api/people/:id/kripo` | `{ aktiv, hinweis }` Kripo-Markierung setzen/entfernen (Recht „kripo_setzen“) |
 | GET / POST | `/api/people/:id/haftbefehle` | Haftbefehle einer Person / neuen ausstellen (`grund` Pflicht) |
 | GET | `/api/haftbefehle?status=offen` | Alle Haftbefehle (optional nach Status) |
 | PATCH | `/api/haftbefehle/:id` | `status`: `offen`, `vollstreckt`, `aufgehoben` |
