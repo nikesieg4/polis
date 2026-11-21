@@ -8,6 +8,21 @@
  */
 
 const STATUSES = ['Sauber', 'Bewährung', 'Fahndung'];
+
+// Strafgesetzbuch: Spannen [min, max]. Muss zu KATALOG in app.js passen.
+const KATALOG = {
+  '§ 1': { name: 'Körperverletzung', geld: [2000, 5000], haft: [10, 20] },
+  '§ 2': { name: 'Versuchter / Vollendeter Totschlag / Mord', geld: [15000, 30000], haft: [30, 60] },
+  '§ 3': { name: 'Geiselnahme / Entführung', geld: [10000, 20000], haft: [25, 45] },
+  '§ 4': { name: 'Widerstand gegen Vollstreckungsbeamte', geld: [3000, 7000], haft: [15, 25] },
+  '§ 5': { name: 'Amtsanmaßung', geld: [5000, 10000], haft: [15, 30] },
+  '§ 6': { name: 'Bestechung / Korruption', geld: [8000, 15000], haft: [20, 35] },
+  '§ 7': { name: 'Diebstahl & Raub', geld: [4000, 10000], haft: [15, 30] },
+  '§ 8': { name: 'Laden- & Bankraub', geld: [12000, 25000], haft: [30, 50] },
+  '§ 9': { name: 'Drogenbesitz & -handel', geld: [3000, 12000], haft: [10, 30] },
+  '§ 10': { name: 'Verstoß gegen das Waffengesetz', geld: [6000, 15000], haft: [20, 40] }
+};
+function clampTo(v, r) { v = Math.round(Number(v)); if (!Number.isFinite(v)) v = r[0]; return Math.min(r[1], Math.max(r[0], v)); }
 const HANDLE_RE = /^[A-Za-z0-9_.]{3,20}$/;
 let schemaReady = false;
 
@@ -30,7 +45,8 @@ const SCHEMA = [
      haft INTEGER NOT NULL DEFAULT 0,
      datum TEXT NOT NULL,
      beamter TEXT,
-     created_at INTEGER NOT NULL
+     created_at INTEGER NOT NULL,
+     erledigt INTEGER NOT NULL DEFAULT 0
    )`,
   `CREATE INDEX IF NOT EXISTS akte_person ON akte(person_num)`
 ];
@@ -52,7 +68,8 @@ function personOut(r) {
     robloxId: r.roblox_id,
     status: r.status,
     danger: !!r.danger,
-    count: r.count || 0
+    count: r.count || 0,
+    offen: r.offen || 0
   };
 }
 function parseId(id) {
@@ -64,6 +81,8 @@ function clean(s, max) { return String(s == null ? '' : s).trim().slice(0, max);
 async function ensureSchema(db) {
   if (schemaReady) return;
   await db.batch(SCHEMA.map((s) => db.prepare(s)));
+  // Ältere Datenbanken: Spalte „erledigt“ nachrüsten
+  try { await db.prepare('ALTER TABLE akte ADD COLUMN erledigt INTEGER NOT NULL DEFAULT 0').run(); } catch { /* existiert schon */ }
   schemaReady = true;
 }
 
@@ -143,7 +162,9 @@ export async function onRequest(context) {
     // GET /api/people
     if (parts.length === 1 && method === 'GET') {
       const { results } = await db.prepare(
-        `SELECT p.*, (SELECT COUNT(*) FROM akte a WHERE a.person_num = p.num) AS count
+        `SELECT p.*,
+                (SELECT COUNT(*) FROM akte a WHERE a.person_num = p.num) AS count,
+                (SELECT COUNT(*) FROM akte a WHERE a.person_num = p.num AND a.erledigt = 0) AS offen
            FROM people p ORDER BY p.num DESC`
       ).all();
       return json({ people: results.map(personOut) });
@@ -188,7 +209,7 @@ export async function onRequest(context) {
     // GET /api/people/:id/akte
     if (parts.length === 3 && parts[2] === 'akte' && method === 'GET') {
       const { results } = await db.prepare(
-        'SELECT id, delikt, geld, haft, datum, beamter FROM akte WHERE person_num = ? ORDER BY id DESC'
+        'SELECT id, delikt, geld, haft, datum, beamter, erledigt FROM akte WHERE person_num = ? ORDER BY id DESC'
       ).bind(num).all();
       return json({ akte: results });
     }
@@ -201,12 +222,47 @@ export async function onRequest(context) {
       const datum = clean(b.datum, 20) || new Date().toISOString().slice(0, 10);
       const beamter = clean(b.beamter, 60) || 'Unbekannt';
       const now = Date.now();
-      const stmts = entries.map((e) => db.prepare(
-        'INSERT INTO akte (person_num, delikt, geld, haft, datum, beamter, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      ).bind(num, clean(e.delikt, 80) || 'Unbekannt', Math.max(0, Math.min(1e9, Math.round(Number(e.geld) || 0))),
-        Math.max(0, Math.min(10000, Math.round(Number(e.haft) || 0))), datum, beamter, now));
+      const rows = [];
+      for (const e of entries) {
+        const para = clean(e.para, 6);
+        const k = KATALOG[para];
+        if (!k) return fail(400, 'Unbekannter Paragraph.');
+        rows.push([para + ' ' + k.name, clampTo(e.geld ?? k.geld[0], k.geld), clampTo(e.haft ?? k.haft[0], k.haft)]);
+      }
+      const stmts = rows.map(([delikt, geld, haft]) => db.prepare(
+        'INSERT INTO akte (person_num, delikt, geld, haft, datum, beamter, created_at, erledigt) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
+      ).bind(num, delikt, geld, haft, datum, beamter, now));
       await db.batch(stmts);
       return json({ ok: true, added: stmts.length }, 201);
+    }
+
+    // PATCH /api/people/:id/akte  { erledigt: true } – alle offenen Strafen erledigt
+    if (parts.length === 3 && parts[2] === 'akte' && method === 'PATCH') {
+      const b = await readBody(request);
+      if (b.erledigt !== true) return fail(400, 'Nur „erledigt: true“ möglich.');
+      const r = await db.prepare('UPDATE akte SET erledigt = 1 WHERE person_num = ? AND erledigt = 0').bind(num).run();
+      return json({ ok: true, changed: r.meta ? r.meta.changes : null });
+    }
+
+    // /api/people/:id/akte/:eintrag
+    if (parts.length === 4 && parts[2] === 'akte') {
+      const eid = Number(parts[3]);
+      if (!Number.isInteger(eid)) return fail(404, 'Eintrag nicht gefunden.');
+      const row = await db.prepare('SELECT * FROM akte WHERE id = ? AND person_num = ?').bind(eid, num).first();
+      if (!row) return fail(404, 'Eintrag nicht gefunden.');
+      // PATCH { erledigt: bool }
+      if (method === 'PATCH') {
+        const b = await readBody(request);
+        if (typeof b.erledigt !== 'boolean') return fail(400, 'Feld „erledigt“ fehlt.');
+        await db.prepare('UPDATE akte SET erledigt = ? WHERE id = ?').bind(b.erledigt ? 1 : 0, eid).run();
+        return json({ ok: true });
+      }
+      // DELETE – nur offene Einträge (z. B. Fehlklick)
+      if (method === 'DELETE') {
+        if (row.erledigt) return fail(409, 'Erledigte Einträge können nicht gelöscht werden.');
+        await db.prepare('DELETE FROM akte WHERE id = ?').bind(eid).run();
+        return json({ ok: true });
+      }
     }
   }
 

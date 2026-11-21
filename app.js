@@ -21,16 +21,6 @@
     { id: 'p9', group: 'Betäubungsmittel & Waffen', para: '§ 9', name: 'Drogenbesitz & -handel', geld: [3000, 12000], haft: [10, 30] },
     { id: 'p10', group: 'Betäubungsmittel & Waffen', para: '§ 10', name: 'Verstoß gegen das Waffengesetz', geld: [6000, 15000], haft: [20, 40] }
   ];
-  function rangeText(c) {
-    return euro(c.geld[0]) + ' bis ' + euro(c.geld[1]) + ', ' + c.haft[0] + ' bis ' + c.haft[1] + ' Min. Haft';
-  }
-  function clampInt(v, r) { v = Math.round(Number(v)); if (!isFinite(v)) v = r[0]; return Math.min(r[1], Math.max(r[0], v)); }
-  function pickedCharges() {
-    return KATALOG.filter(function (c) { return ui.checked[c.id]; }).map(function (c) {
-      var v = ui.checked[c.id];
-      return { c: c, geld: v.geld, haft: v.haft };
-    });
-  }
   var STATUSES = ['Sauber', 'Bewährung', 'Fahndung'];
 
   // ---------- Helfer ----------
@@ -94,12 +84,26 @@
     };
   }
   var local = (legacy && Array.isArray(legacy.people)) ? legacy : demoData();
+  function migrateLocal() {
+    local.nextEntry = local.nextEntry || 1;
+    Object.keys(local.akten).forEach(function (pid) {
+      local.akten[pid].forEach(function (e) {
+        if (!e.id) e.id = local.nextEntry++;
+        if (e.erledigt == null) e.erledigt = 1; // alte Einträge gelten als erledigt
+      });
+    });
+  }
+  migrateLocal();
   function saveLocal() { lsSet(LOCAL_KEY, local); }
+  function localEntry(pid, eid) {
+    return (local.akten[pid] || []).find(function (e) { return e.id === eid; });
+  }
 
   var LocalStore = {
     list: function () {
       return Promise.resolve(local.people.map(function (p) {
-        return Object.assign({}, p, { count: (local.akten[p.id] || []).length });
+        var a = local.akten[p.id] || [];
+        return Object.assign({}, p, { count: a.length, offen: a.filter(function (e) { return !e.erledigt; }).length });
       }));
     },
     akte: function (id) { return Promise.resolve((local.akten[id] || []).slice()); },
@@ -116,8 +120,23 @@
     },
     addEntries: function (id, entries) {
       var d = today(), by = officerLabel();
-      var rows = entries.map(function (c) { return { delikt: c.delikt, geld: c.geld, haft: c.haft, datum: d, beamter: by }; });
+      var rows = entries.map(function (x) {
+        var c = KATALOG.find(function (k) { return k.para === x.para; });
+        return { id: local.nextEntry++, delikt: c.para + ' ' + c.name, geld: c.geld[0], haft: c.haft[0], datum: d, beamter: by, erledigt: 0 };
+      });
       local.akten[id] = rows.concat(local.akten[id] || []); saveLocal();
+      return Promise.resolve();
+    },
+    setDone: function (id, eid, done) {
+      var e = localEntry(id, eid); if (e) { e.erledigt = done ? 1 : 0; saveLocal(); }
+      return Promise.resolve();
+    },
+    allDone: function (id) {
+      (local.akten[id] || []).forEach(function (e) { e.erledigt = 1; }); saveLocal();
+      return Promise.resolve();
+    },
+    remove: function (id, eid) {
+      local.akten[id] = (local.akten[id] || []).filter(function (e) { return e.id !== eid || e.erledigt; }); saveLocal();
       return Promise.resolve();
     }
   };
@@ -148,6 +167,15 @@
     },
     addEntries: function (id, entries) {
       return api('people/' + encodeURIComponent(id) + '/akte', { method: 'POST', body: { entries: entries, beamter: officerLabel(), datum: today() } });
+    },
+    setDone: function (id, eid, done) {
+      return api('people/' + encodeURIComponent(id) + '/akte/' + eid, { method: 'PATCH', body: { erledigt: done } });
+    },
+    allDone: function (id) {
+      return api('people/' + encodeURIComponent(id) + '/akte', { method: 'PATCH', body: { erledigt: true } });
+    },
+    remove: function (id, eid) {
+      return api('people/' + encodeURIComponent(id) + '/akte/' + eid, { method: 'DELETE' });
     }
   };
 
@@ -156,7 +184,7 @@
   var store = LocalStore;
   var people = [];
   var akten = {};          // id -> Array (geladen) | undefined
-  var ui = { q: '', selId: null, checked: {}, saved: false, busy: false, error: '', createError: '', loading: true };
+  var ui = { q: '', sq: '', selId: null, msg: '', busy: false, error: '', createError: '', loading: true };
 
   function findPerson(id) { return people.find(function (p) { return p.id === id; }) || null; }
 
@@ -197,7 +225,7 @@
       return '<button type="button" class="person' + (p.id === ui.selId ? ' selected' : '') + '" data-action="select" data-id="' + esc(p.id) + '">' +
         '<span class="avatar">' + avatarHtml(p) + '</span>' +
         '<span class="person-main"><strong>' + esc(p.name) + '</strong><span>@' + esc(p.roblox) + '  ' + esc(p.id) + '</span></span>' +
-        '<span class="person-count">' + (p.count || 0) + (p.count === 1 ? ' Eintrag' : ' Einträge') + '</span>' +
+        (p.offen ? '<span class="person-open">ausstehend</span>' : '<span class="person-count">' + (p.count || 0) + (p.count === 1 ? ' Eintrag' : ' Einträge') + '</span>') +
         '<span class="chip ' + chipClass(p.status) + '">' + esc(p.status) + '</span></button>';
     }).join('');
 
@@ -222,35 +250,27 @@
 
   // ---------- Strafregister ----------
   function renderRecord() {
-    var box = $('record');
+    var box = $('record'), hist = $('history');
     var p = findPerson(ui.selId);
+    $('strafeBox').hidden = !p;
     if (!p) {
       box.innerHTML = '<div class="placeholder">' + (ui.loading ? 'Wird geladen' : 'Keine Person ausgewählt.') + '</div>';
+      hist.innerHTML = '';
       return;
     }
     var akte = akten[p.id];
     var loaded = Array.isArray(akte);
     akte = akte || [];
-    var geld = akte.reduce(function (a, e) { return a + e.geld; }, 0);
-    var haft = akte.reduce(function (a, e) { return a + e.haft; }, 0);
-    var picked = pickedCharges();
-    var sGeld = picked.reduce(function (a, x) { return a + x.geld; }, 0);
-    var sHaft = picked.reduce(function (a, x) { return a + x.haft; }, 0);
-    var lastGroup = '';
-    var catalogHtml = KATALOG.map(function (c) {
-      var v = ui.checked[c.id];
-      var head = '';
-      if (c.group !== lastGroup) { lastGroup = c.group; head = '<h4 class="cat-group">' + esc(c.group) + '</h4>'; }
-      return head + '<div class="charge-wrap' + (v ? ' on' : '') + '">' +
-        '<label class="charge"><input type="checkbox" data-action="charge" data-id="' + c.id + '"' + (v ? ' checked' : '') + '>' +
-        '<span class="name"><span class="para">' + esc(c.para) + '</span> ' + esc(c.name) + '</span>' +
-        '<span class="price">' + esc(rangeText(c)) + '</span></label>' +
-        (v ? '<div class="amounts">' +
-          '<label>Geldstrafe (€)<input type="number" inputmode="numeric" data-action="amt" data-field="geld" data-id="' + c.id + '" min="' + c.geld[0] + '" max="' + c.geld[1] + '" step="500" value="' + v.geld + '"></label>' +
-          '<label>Haft (Min.)<input type="number" inputmode="numeric" data-action="amt" data-field="haft" data-id="' + c.id + '" min="' + c.haft[0] + '" max="' + c.haft[1] + '" step="1" value="' + v.haft + '"></label>' +
-        '</div>' : '') +
-      '</div>';
-    }).join('');
+    var offen = akte.filter(function (e) { return !e.erledigt; });
+    var oGeld = offen.reduce(function (a, e) { return a + e.geld; }, 0);
+    var oHaft = offen.reduce(function (a, e) { return a + e.haft; }, 0);
+
+    var openBox = !loaded ? '<div class="due due-none">Wird geladen</div>'
+      : offen.length
+        ? '<div class="due"><div class="due-label">Ausstehend</div>' +
+            '<div class="due-values"><span><strong>' + euro(oGeld) + '</strong> Geldstrafe</span><span><strong>' + oHaft + ' Min.</strong> Haft</span></div>' +
+            '<button type="button" class="btn btn-primary" data-action="all-done"' + (ui.busy ? ' disabled' : '') + '>Erledigt</button></div>'
+        : '<div class="due due-none">Nichts ausstehend.</div>';
 
     box.innerHTML =
       '<section class="card flush">' +
@@ -268,24 +288,55 @@
             '<label class="small muted" style="display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer">' +
               '<input type="checkbox" data-action="danger"' + (p.danger ? ' checked' : '') + ' style="width:18px;height:18px;accent-color:#FF6B6B;margin:0"> Gefährlich</label>' +
           '</div>' +
-          (loaded && akte.length ? '<p class="totals-line">Gesamt: ' + euro(geld) + ', ' + haft + ' Min. Haft</p>' : '') +
-          '<div class="entries"><h3>Strafregister</h3>' +
-            (!loaded ? '<span class="empty-note">Wird geladen</span>' : akte.length ? akte.map(function (e) {
-              return '<div class="entry"><div class="entry-top"><strong>' + esc(e.delikt) + '</strong><span>' + esc(e.datum) + '</span></div>' +
-                '<span class="strafe">' + esc(strafeText(e)) + '</span><span class="by">Beamter ' + esc(e.beamter || 'Unbekannt') + '</span></div>';
-            }).join('') : '<span class="empty-note">Keine Einträge.</span>') +
-          '</div>' +
+          openBox +
+          (ui.error ? '<span class="error-msg" role="alert">' + esc(ui.error) + '</span>' : '') +
         '</div>' +
-      '</section>' +
-      '<section class="card">' +
-        '<h2>Strafe eintragen</h2>' +
-        '<div class="catalog">' + catalogHtml + '</div>' +
-        '<p class="hint">Das Strafmaß liegt im Ermessen der zuständigen Beamten und kann bei Einsicht angepasst werden.</p>' +
-        '<div class="sum"><span class="muted" style="font-size:13px">Summe</span><span>' + (picked.length ? euro(sGeld) + ', ' + sHaft + ' Min. Haft' : '0 €') + '</span></div>' +
-        '<button type="button" class="btn btn-primary full" data-action="add"' + (picked.length && !ui.busy ? '' : ' disabled') + '>' + (ui.busy ? 'Bitte warten' : 'Eintragen') + '</button>' +
-        (ui.saved ? '<span class="saved" role="status">Gespeichert.</span>' : '') +
-        (ui.error ? '<span class="error-msg" role="alert">' + esc(ui.error) + '</span>' : '') +
       '</section>';
+
+    hist.innerHTML = '<section class="card"><h2>Strafregister</h2><div class="entries">' +
+      (!loaded ? '<span class="empty-note">Wird geladen</span>' : akte.length ? akte.map(function (e) {
+        return '<div class="entry' + (e.erledigt ? ' done' : ' open') + '"><div class="entry-top"><strong>' + esc(e.delikt) + '</strong><span>' + esc(e.datum) + '</span></div>' +
+          '<span class="strafe">' + esc(strafeText(e)) + '</span>' +
+          '<div class="entry-foot"><span class="by">Beamter ' + esc(e.beamter || 'Unbekannt') + '</span>' +
+          (e.erledigt
+            ? '<span class="tag-done">Erledigt</span>'
+            : '<span class="entry-actions"><span class="tag-open">Ausstehend</span>' +
+              '<button type="button" class="mini" data-action="done" data-eid="' + e.id + '">Erledigt</button>' +
+              '<button type="button" class="mini mini-danger" data-action="remove" data-eid="' + e.id + '">Entfernen</button></span>') +
+          '</div></div>';
+      }).join('') : '<span class="empty-note">Keine Einträge.</span>') +
+      '</div></section>';
+    renderStrafen();
+  }
+
+  function renderStrafen() {
+    var q = ui.sq.trim().toLowerCase().replace(/^§\s*/, '');
+    var list = KATALOG.filter(function (c) {
+      if (!q) return true;
+      var num = c.para.replace('§ ', '');
+      return num === q || c.name.toLowerCase().indexOf(q) !== -1 || c.group.toLowerCase().indexOf(q) !== -1;
+    });
+    $('strafeResults').innerHTML = list.length ? list.map(function (c) {
+      return '<button type="button" class="strafe-btn" data-action="give" data-para="' + esc(c.para) + '"' + (ui.busy ? ' disabled' : '') + '>' +
+        '<span class="name"><span class="para">' + esc(c.para) + '</span> ' + esc(c.name) + '</span>' +
+        '<span class="price">' + esc(euro(c.geld[0]) + ', ' + c.haft[0] + ' Min.') + '</span></button>';
+    }).join('') : '<span class="empty-note">Keine Strafe gefunden.</span>';
+    $('strafeMsg').textContent = ui.msg;
+  }
+
+  function afterChange(p) {
+    return loadAkte(p.id, true).then(function () {
+      var a = akten[p.id] || [];
+      p.count = a.length;
+      p.offen = a.filter(function (e) { return !e.erledigt; }).length;
+      ui.busy = false;
+      renderResults(); renderRecord();
+    });
+  }
+  function run(p, promise, msg) {
+    ui.busy = true; ui.error = ''; ui.msg = ''; renderRecord();
+    return promise.then(function () { ui.msg = msg || ''; return afterChange(p); })
+      .catch(function (e) { ui.busy = false; ui.error = e.message; renderRecord(); });
   }
 
   // ---------- Modus / Login ----------
@@ -334,7 +385,7 @@
     var a = el.dataset.action;
 
     if (a === 'select') {
-      ui.selId = el.dataset.id; ui.saved = false; ui.checked = {}; ui.error = '';
+      ui.selId = el.dataset.id; ui.msg = ''; ui.error = '';
       renderResults(); renderRecord(); loadAkte(ui.selId, mode === 'server');
     } else if (a === 'create') {
       var handle = $('create').dataset.handle;
@@ -345,27 +396,25 @@
         ui.busy = false;
         if (!findPerson(p.id)) people.unshift(p);
         akten[p.id] = akten[p.id] || [];
-        ui.selId = p.id; ui.checked = {}; ui.saved = false;
+        ui.selId = p.id; ui.msg = '';
         ui.q = '@' + p.roblox; $('q').value = ui.q;
         renderResults(); renderRecord();
         if (mode === 'server') loadAkte(p.id, true);
       }).catch(function (e) { ui.busy = false; ui.createError = e.message; renderResults(); });
-    } else if (a === 'add') {
+    } else if (a === 'give') {
       var p = findPerson(ui.selId);
-      var picked = pickedCharges();
-      if (!p || !picked.length || ui.busy) return;
-      ui.busy = true; ui.error = ''; renderRecord();
-      store.addEntries(p.id, picked.map(function (x) {
-        return { delikt: x.c.para + ' ' + x.c.name, geld: clampInt(x.geld, x.c.geld), haft: clampInt(x.haft, x.c.haft) };
-      }))
-        .then(function () {
-          ui.busy = false; ui.checked = {}; ui.saved = true;
-          return loadAkte(p.id, true).then(function () {
-            p.count = (akten[p.id] || []).length;
-            renderResults(); renderRecord();
-          });
-        })
-        .catch(function (e) { ui.busy = false; ui.error = e.message; renderRecord(); });
+      var c = KATALOG.find(function (k) { return k.para === el.dataset.para; });
+      if (!p || !c || ui.busy) return;
+      run(p, store.addEntries(p.id, [{ para: c.para, geld: c.geld[0], haft: c.haft[0] }]), c.para + ' ' + c.name + ' vergeben.');
+    } else if (a === 'all-done') {
+      var p2 = findPerson(ui.selId);
+      if (p2 && !ui.busy) run(p2, store.allDone(p2.id), '');
+    } else if (a === 'done') {
+      var p3 = findPerson(ui.selId);
+      if (p3 && !ui.busy) run(p3, store.setDone(p3.id, Number(el.dataset.eid), true), '');
+    } else if (a === 'remove') {
+      var p4 = findPerson(ui.selId);
+      if (p4 && !ui.busy) run(p4, store.remove(p4.id, Number(el.dataset.eid)), 'Eintrag entfernt.');
     }
   });
 
@@ -373,19 +422,7 @@
     var el = ev.target;
     var a = el.dataset && el.dataset.action;
     var p = findPerson(ui.selId);
-    if (a === 'charge') {
-      var c = KATALOG.find(function (k) { return k.id === el.dataset.id; });
-      if (el.checked && c) ui.checked[c.id] = { geld: c.geld[0], haft: c.haft[0] };
-      else delete ui.checked[el.dataset.id];
-      ui.saved = false; renderRecord();
-    } else if (a === 'amt') {
-      var k = KATALOG.find(function (x) { return x.id === el.dataset.id; });
-      var cur = ui.checked[el.dataset.id];
-      if (k && cur) {
-        cur[el.dataset.field] = clampInt(el.value, k[el.dataset.field]);
-        ui.saved = false; renderRecord();
-      }
-    } else if ((a === 'status' || a === 'danger') && p) {
+    if ((a === 'status' || a === 'danger') && p) {
       var patch = a === 'status' ? { status: el.value } : { danger: el.checked };
       var before = { status: p.status, danger: p.danger };
       Object.assign(p, patch); renderResults(); renderRecord();
@@ -396,6 +433,13 @@
   });
 
   $('q').addEventListener('input', function (ev) { ui.q = ev.target.value; ui.createError = ''; renderResults(); });
+  $('strafeQ').addEventListener('input', function (ev) { ui.sq = ev.target.value; ui.msg = ''; renderStrafen(); });
+  $('strafeQ').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') {
+      var btns = $('strafeResults').querySelectorAll('[data-action="give"]');
+      if (btns.length === 1) btns[0].click();
+    }
+  });
   $('q').addEventListener('keydown', function (ev) {
     if (ev.key === 'Enter') {
       var btn = $('create').querySelector('[data-action="create"]');

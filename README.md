@@ -6,7 +6,7 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 
 ## Funktionen
 - **Personensuche** (links): Suche nach RP-Name, Personen-ID oder `@RobloxName`. Unbekannte Spieler lassen sich direkt anlegen; der Account wird bei Roblox geprüft und der Avatar angezeigt.
-- **Strafregister** (rechts): Einträge pro Person mit Gesamtsumme, Status und Gefährlich-Markierung. Neue Strafen nach dem Strafgesetzbuch (§ 1 bis 10); Geldstrafe und Haftzeit wählt der Beamte innerhalb der Spanne des Paragraphen (`KATALOG` in `app.js`).
+- **Strafregister** (rechts): Strafe suchen (z. B. „Raub“ oder „8“) und anklicken, die Person bekommt sie sofort mit der Mindeststrafe aus dem Strafgesetzbuch (§ 1 bis 10). Oben steht, was **ausstehend** ist (Geld und Haftzeit); mit „Erledigt“ wird es abgehakt. Offene Einträge lassen sich bei einem Fehlklick entfernen.
 
 ## Hosting
 Statische Seite (`index.html`, `style.css`, `app.js`) plus API in `functions/api/` (Cloudflare Pages Functions). Kein Build-Schritt.
@@ -35,7 +35,10 @@ Alle Endpunkte außer `health` und `avatar` brauchen den Header `x-polis-key`.
 | GET | `/api/people` | Alle Personen mit Anzahl Einträge |
 | POST | `/api/people` | Person anlegen (`roblox`, `name`), prüft den Account bei Roblox |
 | PATCH | `/api/people/:id` | `status`, `danger`, `name` ändern |
-| GET / POST | `/api/people/:id/akte` | Strafregister lesen / Einträge hinzufügen |
+| GET | `/api/people/:id/akte` | Strafregister lesen |
+| POST | `/api/people/:id/akte` | Strafe vergeben (`entries: [{ para: "§ 8" }]`), Beträge werden auf die Spanne des Paragraphen begrenzt |
+| PATCH | `/api/people/:id/akte` | `{ erledigt: true }`: alle ausstehenden Strafen erledigt |
+| PATCH / DELETE | `/api/people/:id/akte/:eintrag` | einzelnen Eintrag erledigen / ausstehenden Eintrag löschen |
 | GET | `/api/roblox/:name` | Roblox-Account nachschlagen |
 | GET | `/api/avatar/:robloxId` | Weiterleitung auf das Roblox-Avatarbild |
 
