@@ -223,3 +223,19 @@ h3 { font-size: 14px; font-weight: 600; }
   .clock { font-size: 34px; }
   .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+
+/* Modus, Login, Fehler */
+.chip-red { background: #3A1518; color: #FFB3B3; }
+.gate {
+  position: fixed; inset: 0; z-index: 10; background: rgba(6, 10, 20, 0.92);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.gate[hidden] { display: none; }
+.gate-card { width: 100%; max-width: 400px; align-items: stretch; }
+.gate-card svg { align-self: center; }
+.gate-card h1 { text-align: center; }
+.gate-error { font-size: 13px; color: #FFB3B3; min-height: 1em; }
+.error-msg { font-size: 13px; color: #FFB3B3; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
+.avatar { overflow: hidden; }
+[hidden] { display: none !important; }
