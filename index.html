@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>POLIS · Polizei Berlin City Roleplay</title>
+<meta name="description" content="Inoffizielle Polizei-Datenbank für Berlin City Roleplay (Emergency Hamburg auf Roblox).">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 34 38'%3E%3Cpath d='M17 1.5 31.5 7v11c0 9.2-6.1 15.8-14.5 18.5C8.6 33.8 2.5 27.2 2.5 18V7L17 1.5Z' fill='%230B1220' stroke='%234C8DFF' stroke-width='2.4'/%3E%3Cpath d='m17 10 2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.6-4.8 2.6.9-5.4-3.9-3.8 5.4-.8L17 10Z' fill='%234C8DFF'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg width="28" height="32" viewBox="0 0 34 38" fill="none" aria-hidden="true"><path d="M17 1.5 31.5 7v11c0 9.2-6.1 15.8-14.5 18.5C8.6 33.8 2.5 27.2 2.5 18V7L17 1.5Z" stroke="#4C8DFF" stroke-width="2.2"/><path d="m17 10 2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.6-4.8 2.6.9-5.4-3.9-3.8 5.4-.8L17 10Z" fill="#4C8DFF"/></svg>
+    <span class="brand-name">POLIS</span>
+    <span class="muted small">Polizei · Berlin City Roleplay</span>
+    <span class="test-badge">TEST</span>
+  </div>
+  <div class="officer">
+    <label class="officer-field">
+      <span class="sr">Dein Name</span>
+      <input id="officerName" type="text" placeholder="Dein Name" autocomplete="off">
+    </label>
+    <label class="officer-field">
+      <span class="sr">Dienstnummer</span>
+      <input id="officerNr" type="text" placeholder="Dienstnr." autocomplete="off" class="mono">
+    </label>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- LINKS: SCHICHT -->
+  <aside class="col col-left" aria-label="Schicht">
+    <section class="card">
+      <div class="row-between">
+        <h2>Schicht</h2>
+        <span id="shiftChip" class="chip"></span>
+      </div>
+      <div class="clock-box">
+        <span id="clock" class="clock mono">00:00:00</span>
+        <span id="clockSub" class="muted small">Keine aktive Schicht</span>
+      </div>
+      <div id="shiftButtons"></div>
+      <dl class="totals">
+        <div><dt>Heute gesamt</dt><dd id="todayTotal" class="mono">0:00 h</dd></div>
+        <div><dt>Diese Woche</dt><dd id="weekTotal" class="mono">0:00 h</dd></div>
+      </dl>
+    </section>
+    <section class="card">
+      <h2>Letzte Schichten</h2>
+      <div id="shiftList"></div>
+    </section>
+  </aside>
+
+  <!-- MITTE: SUCHE + KATEGORIEN -->
+  <main class="col col-mid">
+    <section class="card">
+      <h1>Personensuche</h1>
+      <label class="search">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9AA6BF" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <span class="sr">Person suchen</span>
+        <input id="q" type="search" placeholder="Name, @RobloxName oder Personen-ID" autocomplete="off" spellcheck="false">
+      </label>
+      <span id="count" class="muted small"></span>
+      <div id="results" class="results"></div>
+      <div id="create"></div>
+    </section>
+
+    <section class="card">
+      <h2>Kategorien</h2>
+      <div class="cats">
+        <button type="button" class="cat active" aria-pressed="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>
+          <strong>Strafdatenbank</strong><span>Aktiv</span>
+        </button>
+        <button type="button" class="cat" aria-disabled="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 16V11l2-5h10l2 5v5"/><path d="M3 16h18v3H3z"/></svg>
+          <strong>Fahrzeuge</strong><span>Bald verfügbar</span>
+        </button>
+        <button type="button" class="cat" aria-disabled="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          <strong>Haftbefehle</strong><span>Bald verfügbar</span>
+        </button>
+        <button type="button" class="cat" aria-disabled="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          <strong>Einsatzberichte</strong><span>Bald verfügbar</span>
+        </button>
+        <button type="button" class="cat" aria-disabled="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/></svg>
+          <strong>Lizenzen</strong><span>Bald verfügbar</span>
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <!-- RECHTS: STRAFREGISTER -->
+  <aside id="record" class="col col-right" aria-label="Strafregister"></aside>
+</div>
+
+<footer class="footer">
+  <span>Inoffizielles Roleplay-Tool · keine echten Daten · Daten werden nur in diesem Browser gespeichert</span>
+  <button type="button" id="resetBtn" class="linkbtn">Demo-Daten zurücksetzen</button>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
