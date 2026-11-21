@@ -8,7 +8,7 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 - **Personensuche** (links): Suche nach RP-Name, Personen-ID oder `@RobloxName`. Unbekannte Spieler lassen sich direkt anlegen; der Account wird bei Roblox geprüft und der Avatar angezeigt.
 - **Strafregister** (rechts): Strafe suchen (z. B. „Raub“ oder „8“) und anklicken, die Person bekommt sie sofort mit der Mindeststrafe aus dem Strafgesetzbuch (§ 1 bis 10). Oben steht, was **ausstehend** ist (Geld und Haftzeit); mit „Erledigt“ wird es abgehakt. Offene Einträge lassen sich bei einem Fehlklick entfernen.
 
-- **Haftbefehle**: bei der Person ausstellen (Kennzeichen, Auto Modell, Grund, Beweise; ausgestellt von = eigener Name). Offene Haftbefehle stehen im Tab „Haftbefehle“ und als roter Balken bei der Person. Status: offen, vollstreckt, aufgehoben. „Für Discord kopieren“ erzeugt den Text im Discord-Format inkl. Teamtag (`TEAMTAG` in `app.js`).
+- **Haftbefehle**: bei der Person ausstellen (Kennzeichen, Auto Modell, Grund, Beweise; ausgestellt von = eigener Name). Offene Haftbefehle stehen im Tab „Haftbefehle“ und als roter Balken bei der Person. Status: offen, vollstreckt, aufgehoben. „Für Discord kopieren“ erzeugt den Text im Discord-Format; der Teamtag pingt die Rolle @Präsidium-Team (`TEAMTAG` in `app.js`, Rollen-ID 1476650119700156618).
 
 ## Hosting
 Statische Seite (`index.html`, `style.css`, `app.js`) plus API in `functions/api/` (Cloudflare Pages Functions). Kein Build-Schritt.

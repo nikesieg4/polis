@@ -22,7 +22,7 @@
     { id: 'p10', group: 'Betäubungsmittel & Waffen', para: '§ 10', name: 'Verstoß gegen das Waffengesetz', geld: [6000, 15000], haft: [20, 40] }
   ];
   var STATUSES = ['Sauber', 'Bewährung', 'Fahndung'];
-  var TEAMTAG = '@Präsidium-Team';
+  var TEAMTAG = '<@&1476650119700156618>'; // Rolle @Präsidium-Team
 
   // ---------- Helfer ----------
   function $(id) { return document.getElementById(id); }
