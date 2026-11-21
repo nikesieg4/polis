@@ -402,7 +402,7 @@
     var box = $('adminBox');
     box.hidden = !(isAdmin && p);
     $('adminBadge').hidden = !isAdmin;
-    $('adminBtn').hidden = !(mode === 'server' && adminAvailable);
+    $('adminBtn').hidden = !(mode === 'server' && adminAvailable && authMode !== 'discord');
     $('adminBtn').textContent = isAdmin ? 'Admin beenden' : 'Admin';
     if (!p || !isAdmin) { box.dataset.pid = ''; return; }
     if (box.dataset.pid !== p.id) {
@@ -639,10 +639,29 @@
     'ungueltig': 'Anmeldung abgelaufen. Bitte noch einmal versuchen.',
     'fehler': 'Anmeldung bei Discord fehlgeschlagen. Bitte noch einmal versuchen.'
   };
+  var keyLoginAllowed = false;
+  var AUTH_CHOICE = 'polis.authChoice';
   function showDiscordGate(msg) {
     $('discordGate').hidden = false;
     $('discordError').textContent = msg || '';
+    $('keyLoginBtn').hidden = !keyLoginAllowed;
   }
+  // Testphase: Anmeldung mit Dienstschlüssel statt Discord
+  function enterKeyLogin() {
+    authMode = 'key'; me = null; mode = 'server';
+    lsSet(AUTH_CHOICE, 'key');
+    $('discordGate').hidden = true;
+    renderMe(); renderOfficer(); renderMode();
+    if (!key) { showGate(''); return; }
+    api('auth').then(function () { enterServer(); })
+      .catch(function (e) { if (e.status !== 401) showGate(e.message); });
+  }
+  $('keyLoginBtn').addEventListener('click', enterKeyLogin);
+  $('gateBackBtn').addEventListener('click', function () {
+    lsSet(AUTH_CHOICE, '');
+    $('gate').hidden = true;
+    enterDiscord();
+  });
   function renderMe() {
     var d = authMode === 'discord';
     $('meBox').hidden = !(d && me);
@@ -668,6 +687,7 @@
     });
   }
   function showGate(msg) {
+    $('gateBackBtn').hidden = !keyLoginAllowed;
     $('gate').hidden = false;
     $('gateError').textContent = msg || '';
     setTimeout(function () { $('gateKey').focus(); }, 0);
@@ -702,6 +722,7 @@
       return;
     }
     key = ''; lsSet(KEY_STORE, '');
+    if (keyLoginAllowed) { lsSet(AUTH_CHOICE, ''); isAdmin = false; enterDiscord(); return; }
     showGate('');
   });
 
@@ -883,7 +904,10 @@
     .catch(function () { return null; })
     .then(function (h) {
       if (h && h.ok && h.db && h.auth === 'discord') {
-        enterDiscord();
+        keyLoginAllowed = !!h.keyLogin;
+        adminAvailable = !!h.keyLogin && !!h.adminSet;
+        if (keyLoginAllowed && lsGet(AUTH_CHOICE) === 'key') enterKeyLogin();
+        else enterDiscord();
       } else if (h && h.ok && h.db && h.keySet) {
         adminAvailable = !!h.adminSet;
         renderMode();

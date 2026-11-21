@@ -289,3 +289,4 @@ body.no-officer #hbNewBtn { opacity: 0.45; cursor: not-allowed; }
 .me-box img { border-radius: 50%; flex-shrink: 0; }
 .me-box span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .officer-field[hidden] { display: none !important; }
+#keyLoginBtn, #gateBackBtn { width: 100%; }

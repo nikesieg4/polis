@@ -36,7 +36,9 @@ Einrichtung:
    - `DISCORD_GUILD_ID` (Rechtsklick auf den Server → Server-ID kopieren, Entwicklermodus nötig)
 
    Rollen-IDs sind nicht nötig, die Rollen werden über ihre Namen (A1 … A10, Datenbank Admin) erkannt.
-5. Neu deployen. Ab dann gelten `POLIS_KEY` und `POLIS_KEY_ADMIN` nicht mehr und können gelöscht werden.
+5. Neu deployen.
+
+**Testphase:** Solange das Secret `POLIS_KEY` noch existiert, gibt es im Anmeldefenster zusätzlich „Ohne Discord anmelden“ (Dienstschlüssel, Name und Dienstnummer selbst eingetragen, Admin über `POLIS_KEY_ADMIN`). Solche Einträge stehen im Protokoll mit „ohne Discord“. Zum Abschalten `POLIS_KEY` und `POLIS_KEY_ADMIN` löschen und neu deployen, dann geht nur noch Discord.
 
 ## Hosting
 Statische Seite (`index.html`, `style.css`, `app.js`) plus API in `functions/api/` (Cloudflare Pages Functions). Kein Build-Schritt.

@@ -180,7 +180,9 @@ export async function onRequest(context) {
   // --- Öffentlich: Status ---
   if (route === 'health') {
     const discord = discordConfigured(env);
-    return json({ ok: true, db: !!env.DB, auth: discord ? 'discord' : 'key', keySet: discord || !!env.POLIS_KEY, adminSet: !discord && !!env.POLIS_KEY_ADMIN });
+    return json({ ok: true, db: !!env.DB, auth: discord ? 'discord' : 'key', keySet: discord || !!env.POLIS_KEY,
+      // Testphase: solange POLIS_KEY gesetzt ist, geht auch die Anmeldung ohne Discord
+      keyLogin: discord && !!env.POLIS_KEY, adminSet: !!env.POLIS_KEY_ADMIN });
   }
 
   // --- Öffentlich: Avatarbild (nur Weiterleitung auf Roblox-CDN) ---
@@ -203,7 +205,9 @@ export async function onRequest(context) {
   await ensureSchema(db);
 
   let isAdmin, officer, canHb = true;
-  if (discordConfigured(env)) {
+  // Ohne Discord anmelden (Testphase): nur wenn POLIS_KEY noch existiert und der Client ihn mitschickt
+  const viaKey = !!env.POLIS_KEY && !!request.headers.get('x-polis-key');
+  if (discordConfigured(env) && !viaKey) {
     // --- Anmeldung über Discord: Name und Rollen kommen vom Discord-Server ---
     if (parts[0] === 'auth') {
       const r = await handleAuth(request, env, db, parts);
@@ -231,9 +235,11 @@ export async function onRequest(context) {
     if (method !== 'GET' && (!officer.name || !officer.nr)) {
       return fail(403, 'Bitte oben Name und Dienstnummer eintragen.');
     }
+    // Im Protokoll erkennbar machen, dass der Name nicht von Discord geprüft ist
+    if (discordConfigured(env)) officer.nr += ', ohne Discord';
   }
   const needHb = () => fail(403, 'Haftbefehle bearbeiten darf man erst ab A' + rankLimits(env).hb + '.');
-  const needAdmin = () => fail(403, discordConfigured(env) ? 'Dafür brauchst du die Admin-Rolle auf dem Discord-Server.' : 'Dafür ist das Admin-Passwort nötig.');
+  const needAdmin = () => fail(403, discordConfigured(env) && !viaKey ? 'Dafür brauchst du die Admin-Rolle auf dem Discord-Server.' : 'Dafür ist das Admin-Passwort nötig.');
   const beamter = officer.name + ' (' + officer.nr + ')';
   const logIt = (aktion, personNum, details) => db.prepare(
     'INSERT INTO log (ts, beamter_name, beamter_nr, aktion, person_num, details) VALUES (?, ?, ?, ?, ?, ?)'
