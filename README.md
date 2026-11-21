@@ -8,6 +8,8 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 - **Personensuche** (links): Suche nach RP-Name, Personen-ID oder `@RobloxName`. Unbekannte Spieler lassen sich direkt anlegen; der Account wird bei Roblox geprüft und der Avatar angezeigt.
 - **Strafregister** (rechts): Strafe suchen (z. B. „Raub“ oder „8“) und anklicken, die Person bekommt sie sofort mit der Mindeststrafe aus dem Strafgesetzbuch (§ 1 bis 10). Oben steht, was **ausstehend** ist (Geld und Haftzeit); mit „Erledigt“ wird es abgehakt. Offene Einträge lassen sich bei einem Fehlklick entfernen.
 
+- **Haftbefehle**: bei der Person ausstellen (Kennzeichen, Auto Modell, Grund, Beweise; ausgestellt von = eigener Name). Offene Haftbefehle stehen im Tab „Haftbefehle“ und als roter Balken bei der Person. Status: offen, vollstreckt, aufgehoben. „Für Discord kopieren“ erzeugt den Text im Discord-Format inkl. Teamtag (`TEAMTAG` in `app.js`).
+
 ## Hosting
 Statische Seite (`index.html`, `style.css`, `app.js`) plus API in `functions/api/` (Cloudflare Pages Functions). Kein Build-Schritt.
 
@@ -39,6 +41,9 @@ Alle Endpunkte außer `health` und `avatar` brauchen den Header `x-polis-key`.
 | POST | `/api/people/:id/akte` | Strafe vergeben (`entries: [{ para: "§ 8" }]`), Beträge werden auf die Spanne des Paragraphen begrenzt |
 | PATCH | `/api/people/:id/akte` | `{ erledigt: true }`: alle ausstehenden Strafen erledigt |
 | PATCH / DELETE | `/api/people/:id/akte/:eintrag` | einzelnen Eintrag erledigen / ausstehenden Eintrag löschen |
+| GET / POST | `/api/people/:id/haftbefehle` | Haftbefehle einer Person / neuen ausstellen (`grund` Pflicht) |
+| GET | `/api/haftbefehle?status=offen` | Alle Haftbefehle (optional nach Status) |
+| PATCH | `/api/haftbefehle/:id` | `status`: `offen`, `vollstreckt`, `aufgehoben` |
 | GET | `/api/roblox/:name` | Roblox-Account nachschlagen |
 | GET | `/api/avatar/:robloxId` | Weiterleitung auf das Roblox-Avatarbild |
 

@@ -48,8 +48,43 @@ const SCHEMA = [
      created_at INTEGER NOT NULL,
      erledigt INTEGER NOT NULL DEFAULT 0
    )`,
-  `CREATE INDEX IF NOT EXISTS akte_person ON akte(person_num)`
+  `CREATE INDEX IF NOT EXISTS akte_person ON akte(person_num)`,
+  `CREATE TABLE IF NOT EXISTS haftbefehle (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     person_num INTEGER NOT NULL REFERENCES people(num),
+     kennzeichen TEXT,
+     modell TEXT,
+     grund TEXT NOT NULL,
+     beweise TEXT,
+     ausgestellt_von TEXT,
+     created_at INTEGER NOT NULL,
+     status TEXT NOT NULL DEFAULT 'offen',
+     closed_at INTEGER,
+     closed_by TEXT
+   )`,
+  `CREATE INDEX IF NOT EXISTS hb_person ON haftbefehle(person_num)`,
+  `CREATE INDEX IF NOT EXISTS hb_status ON haftbefehle(status)`
 ];
+const HB_STATUS = ['offen', 'vollstreckt', 'aufgehoben'];
+function hbOut(r) {
+  return {
+    id: r.id,
+    personId: 'P-' + (1000 + r.person_num),
+    name: r.name,
+    roblox: r.roblox,
+    robloxId: r.roblox_id,
+    kennzeichen: r.kennzeichen || '',
+    modell: r.modell || '',
+    grund: r.grund,
+    beweise: r.beweise || '',
+    ausgestelltVon: r.ausgestellt_von || '',
+    createdAt: r.created_at,
+    status: r.status,
+    closedAt: r.closed_at,
+    closedBy: r.closed_by || ''
+  };
+}
+const HB_SELECT = `SELECT h.*, p.name, p.roblox, p.roblox_id FROM haftbefehle h JOIN people p ON p.num = h.person_num`;
 
 function json(data, status = 200, extra = {}) {
   return new Response(JSON.stringify(data), {
@@ -69,7 +104,8 @@ function personOut(r) {
     status: r.status,
     danger: !!r.danger,
     count: r.count || 0,
-    offen: r.offen || 0
+    offen: r.offen || 0,
+    haftbefehle: r.hb || 0
   };
 }
 function parseId(id) {
@@ -157,6 +193,29 @@ export async function onRequest(context) {
     }
   }
 
+  // GET /api/haftbefehle?status=offen
+  if (parts[0] === 'haftbefehle' && parts.length === 1 && method === 'GET') {
+    const st = new URL(request.url).searchParams.get('status');
+    const q = HB_STATUS.includes(st)
+      ? db.prepare(HB_SELECT + ' WHERE h.status = ? ORDER BY h.id DESC LIMIT 200').bind(st)
+      : db.prepare(HB_SELECT + ' ORDER BY h.id DESC LIMIT 200');
+    const { results } = await q.all();
+    return json({ haftbefehle: results.map(hbOut) });
+  }
+
+  // PATCH /api/haftbefehle/:id  { status: 'vollstreckt' | 'aufgehoben' | 'offen', beamter }
+  if (parts[0] === 'haftbefehle' && parts.length === 2 && method === 'PATCH') {
+    const hid = Number(parts[1]);
+    const b = await readBody(request);
+    if (!Number.isInteger(hid) || !HB_STATUS.includes(b.status)) return fail(400, 'Ungültiger Status.');
+    const closed = b.status === 'offen' ? [null, null] : [Date.now(), clean(b.beamter, 60) || 'Unbekannt'];
+    const row = await db.prepare('UPDATE haftbefehle SET status = ?, closed_at = ?, closed_by = ? WHERE id = ? RETURNING id')
+      .bind(b.status, closed[0], closed[1], hid).first();
+    if (!row) return fail(404, 'Haftbefehl nicht gefunden.');
+    const full = await db.prepare(HB_SELECT + ' WHERE h.id = ?').bind(hid).first();
+    return json({ haftbefehl: hbOut(full) });
+  }
+
   // /api/people
   if (parts[0] === 'people') {
     // GET /api/people
@@ -164,7 +223,8 @@ export async function onRequest(context) {
       const { results } = await db.prepare(
         `SELECT p.*,
                 (SELECT COUNT(*) FROM akte a WHERE a.person_num = p.num) AS count,
-                (SELECT COUNT(*) FROM akte a WHERE a.person_num = p.num AND a.erledigt = 0) AS offen
+                (SELECT COUNT(*) FROM akte a WHERE a.person_num = p.num AND a.erledigt = 0) AS offen,
+                (SELECT COUNT(*) FROM haftbefehle h WHERE h.person_num = p.num AND h.status = 'offen') AS hb
            FROM people p ORDER BY p.num DESC`
       ).all();
       return json({ people: results.map(personOut) });
@@ -204,6 +264,25 @@ export async function onRequest(context) {
       const row = await db.prepare('UPDATE people SET status = ?, danger = ?, name = ? WHERE num = ? RETURNING *')
         .bind(status, danger, name, num).first();
       return json({ person: personOut(row) });
+    }
+
+    // GET /api/people/:id/haftbefehle
+    if (parts.length === 3 && parts[2] === 'haftbefehle' && method === 'GET') {
+      const { results } = await db.prepare(HB_SELECT + ' WHERE h.person_num = ? ORDER BY h.id DESC').bind(num).all();
+      return json({ haftbefehle: results.map(hbOut) });
+    }
+
+    // POST /api/people/:id/haftbefehle  { kennzeichen, modell, grund, beweise, beamter }
+    if (parts.length === 3 && parts[2] === 'haftbefehle' && method === 'POST') {
+      const b = await readBody(request);
+      const grund = clean(b.grund, 200);
+      if (!grund) return fail(400, 'Grund fehlt.');
+      const ins = await db.prepare(
+        `INSERT INTO haftbefehle (person_num, kennzeichen, modell, grund, beweise, ausgestellt_von, created_at, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'offen') RETURNING id`
+      ).bind(num, clean(b.kennzeichen, 20), clean(b.modell, 60), grund, clean(b.beweise, 500), clean(b.beamter, 100) || 'Unbekannt', Date.now()).first();
+      const full = await db.prepare(HB_SELECT + ' WHERE h.id = ?').bind(ins.id).first();
+      return json({ haftbefehl: hbOut(full) }, 201);
     }
 
     // GET /api/people/:id/akte
