@@ -44,7 +44,9 @@
   }
   function euro(n) { return Number(n).toLocaleString('de-DE') + ' €'; }
   function initials(n) {
-    var s = String(n).replace(/^@/, '').split(/[\s_.]+/).filter(Boolean).map(function (w) { return w[0]; }).join('');
+    // nur Wörter, die mit einem Buchstaben beginnen („POK [44] Becker“ -> „PB“)
+    var s = String(n).replace(/^@/, '').split(/[^A-Za-zÄÖÜäöüß0-9]+/).filter(function (w) { return /^[A-Za-zÄÖÜäöüß]/.test(w); })
+      .map(function (w) { return w[0]; }).join('');
     return (s || '?').slice(0, 2).toUpperCase();
   }
   function strafeText(e) { return euro(e.geld) + (e.haft ? ', ' + e.haft + ' Min. Haft' : ''); }
@@ -68,8 +70,17 @@
   function savePrefs() { lsSet(PREFS_KEY, prefs); }
   var authMode = 'key'; // 'key' | 'discord'
   var me = null;        // angemeldetes Discord-Mitglied
-  function canHb() { return authMode !== 'discord' || !!(me && me.canHb); }
-  function canGruppe() { return authMode !== 'discord' || !!(me && me.canGruppe); }
+  // Rechte des angemeldeten Beamten (vom Server, siehe lib/rechte.js)
+  var perms = [];
+  var LOCAL_PERMS = ['zugriff', 'personen', 'strafen', 'beschreibung', 'haftbefehle', 'gruppen', 'protokoll'];
+  function has(k) { return (mode === 'local' ? LOCAL_PERMS : perms).indexOf(k) !== -1; }
+  function setPerms(m) { perms = (m && m.perms) || []; isAdmin = has('admin'); }
+  function loadPerms() {
+    return api('me').then(function (m) { setPerms(m); if (authMode === 'discord') me = m; renderPermUi(); })
+      .catch(function () {});
+  }
+  function canHb() { return has('haftbefehle'); }
+  function canGruppe() { return has('gruppen'); }
   function officerLabel() {
     if (authMode === 'discord') return me ? me.name + ' (@' + me.username + ')' : 'Unbekannt';
     var o = prefs.officer || {};
@@ -384,6 +395,7 @@
     $('results').hidden = ui.tab !== 'personen'; $('create').hidden = ui.tab !== 'personen';
     $('hbResults').hidden = ui.tab !== 'hb'; $('logResults').hidden = ui.tab !== 'log';
     $('gruppenResults').hidden = ui.tab !== 'gruppen';
+    $('tabLog').hidden = !has('protokoll');
   }
   function renderGruppenResults() {
     var q = ui.q.trim().toLowerCase();
@@ -461,7 +473,10 @@
     var handle = /^[a-z0-9_.]{3,20}$/.test(q) ? q : '';
     var exact = people.some(function (p) { return p.roblox.toLowerCase() === q; });
     var create = $('create');
-    if (handle && !exact) {
+    if (handle && !exact && !has('personen')) {
+      create.dataset.handle = '';
+      create.innerHTML = '<div class="placeholder">@' + esc(handle) + ' ist nicht im Register. Personen anlegen darf deine Rolle nicht.</div>';
+    } else if (handle && !exact) {
       if (create.dataset.handle !== handle || create.dataset.err !== ui.createError || create.dataset.busy !== String(ui.busy)) {
         var prevName = $('newName') ? $('newName').value : '';
         create.dataset.handle = handle; create.dataset.err = ui.createError; create.dataset.busy = String(ui.busy);
@@ -497,6 +512,7 @@
     box.hidden = !p;
     if (!p) { box.dataset.pid = ''; return; }
     if (box.dataset.pid !== p.id) { box.dataset.pid = p.id; closeInfoForm(); }
+    if ($('infoForm').hidden) $('infoEditBtn').hidden = !has('beschreibung');
     var hasAny = p.gruppe || p.gruppeRang || p.beschreibung;
     $('infoView').hidden = !$('infoForm').hidden;
     $('infoView').innerHTML = hasAny
@@ -560,7 +576,7 @@
     renderInfo();
     var box = $('record'), hist = $('history');
     var p = findPerson(ui.selId);
-    $('strafeBox').hidden = !p;
+    $('strafeBox').hidden = !p || !has('strafen');
     $('hbBox').hidden = !p;
     if (!p) {
       box.innerHTML = '<div class="placeholder">' + (ui.loading ? 'Wird geladen' : 'Keine Person ausgewählt.') + '</div>';
@@ -578,7 +594,7 @@
       : offen.length
         ? '<div class="due"><div class="due-label">Ausstehend</div>' +
             '<div class="due-values"><span><strong>' + euro(oGeld) + '</strong> Geldstrafe</span><span><strong>' + oHaft + ' Min.</strong> Haft</span></div>' +
-            '<button type="button" class="btn btn-primary" data-action="all-done"' + (ui.busy ? ' disabled' : '') + '>Erledigt</button></div>'
+            (has('strafen') ? '<button type="button" class="btn btn-primary" data-action="all-done"' + (ui.busy ? ' disabled' : '') + '>Erledigt</button>' : '') + '</div>'
         : '<div class="due due-none">Nichts ausstehend.</div>';
 
     box.innerHTML =
@@ -592,11 +608,11 @@
             '<span class="chip ' + chipClass(p.status) + '">' + esc(p.status) + '</span></div>' +
           '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">' +
             '<label class="small muted" style="display:flex;align-items:center;gap:8px">Status ' +
-              '<select class="status-select" data-action="status">' + STATUSES.map(function (s) {
+              '<select class="status-select" data-action="status"' + (has('personen') ? '' : ' disabled') + '>' + STATUSES.map(function (s) {
                 return '<option' + (s === p.status ? ' selected' : '') + '>' + s + '</option>';
               }).join('') + '</select></label>' +
             '<label class="small muted" style="display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer">' +
-              '<input type="checkbox" data-action="danger"' + (p.danger ? ' checked' : '') + ' style="width:18px;height:18px;accent-color:#FF6B6B;margin:0"> Gefährlich</label>' +
+              '<input type="checkbox" data-action="danger"' + (p.danger ? ' checked' : '') + (has('personen') ? '' : ' disabled') + ' style="width:18px;height:18px;accent-color:#FF6B6B;margin:0"> Gefährlich</label>' +
           '</div>' +
           openBox +
           (ui.error ? '<span class="error-msg" role="alert">' + esc(ui.error) + '</span>' : '') +
@@ -611,6 +627,7 @@
           (!e.erledigt && ui.edit && ui.edit.eid === e.id ? '' : e.erledigt
             ? '<span class="entry-actions"><span class="tag-done">Erledigt</span>' +
               (isAdmin ? '<button type="button" class="mini mini-danger" data-action="remove" data-done="1" data-eid="' + e.id + '">Löschen</button>' : '') + '</span>'
+            : !has('strafen') ? '<span class="entry-actions"><span class="tag-open">Ausstehend</span></span>'
             : '<span class="entry-actions"><span class="tag-open">Ausstehend</span>' +
               (catFor(e.delikt) ? '<button type="button" class="mini" data-action="adjust" data-eid="' + e.id + '">Anpassen</button>' : '') +
               '<button type="button" class="mini" data-action="done" data-eid="' + e.id + '">Erledigt</button>' +
@@ -748,7 +765,7 @@
     setTimeout(function () { $('adminKey').focus(); }, 0);
   }
   $('adminBtn').addEventListener('click', function () {
-    if (isAdmin) { isAdmin = false; setAdminKey(''); renderRecord(); return; }
+    if (isAdmin) { setAdminKey(''); loadPerms().then(renderRecord); return; }
     openAdminGate();
   });
   $('adminCancel').addEventListener('click', function () { $('adminGate').hidden = true; $('adminKey').value = ''; });
@@ -757,14 +774,14 @@
     var prev = adminKey;
     setAdminKey($('adminKey').value.trim());
     api('admin').then(function () {
-      isAdmin = true; $('adminGate').hidden = true; $('adminKey').value = '';
-      renderRecord();
+      $('adminGate').hidden = true; $('adminKey').value = '';
+      loadPerms().then(renderRecord);
     }).catch(function (e) { setAdminKey(prev); $('adminError').textContent = e.message; });
   });
   function checkAdmin() {
     if (authMode === 'discord' || !adminKey || mode !== 'server') return;
-    api('admin').then(function () { isAdmin = true; renderRecord(); })
-      .catch(function () { isAdmin = false; setAdminKey(''); renderRecord(); });
+    api('admin').then(function () { return loadPerms(); }).then(renderRecord)
+      .catch(function () { setAdminKey(''); loadPerms().then(renderRecord); });
   }
   $('admSave').addEventListener('click', function (ev) {
     if (blockIfNoOfficer(ev)) return;
@@ -798,7 +815,7 @@
     }).catch(function (e) { $('admMsg').textContent = e.message; });
   });
   var LOGIN_REASONS = {
-    'keine-rolle': 'Kein Zugriff: Du brauchst auf dem Discord-Server eine Rolle von A1 bis A10 oder Datenbank Admin.',
+    'keine-rolle': 'Kein Zugriff: Deine Discord-Rollen haben kein Recht, die Datenbank zu öffnen.',
     'abgebrochen': 'Anmeldung abgebrochen.',
     'ungueltig': 'Anmeldung abgelaufen. Bitte noch einmal versuchen.',
     'fehler': 'Anmeldung bei Discord fehlgeschlagen. Bitte noch einmal versuchen.'
@@ -842,7 +859,7 @@
     if (reason) history.replaceState(null, '', location.pathname);
     renderMe();
     api('me').then(function (m) {
-      me = m; isAdmin = !!m.admin;
+      me = m; setPerms(m);
       $('discordGate').hidden = true;
       renderMe(); renderOfficer();
       enterServer();
@@ -861,12 +878,13 @@
     mode = 'server'; store = ServerStore; people = []; akten = {}; ui.loading = true; ui.selId = null;
     renderMode(); renderResults(); renderRecord();
     refreshPeople().then(function () { loadAkte(ui.selId); loadHb(ui.selId); });
+    if (authMode === 'discord') renderPermUi(); else loadPerms();
     checkAdmin();
   }
   function enterLocal() {
     logList = null;
     mode = 'local'; store = LocalStore; ui.loading = true;
-    renderMode();
+    renderMode(); renderPermUi();
     refreshPeople().then(function () { loadAkte(ui.selId); loadHb(ui.selId); });
   }
 
@@ -1126,9 +1144,258 @@
       if (ui.tab === 'log') loadLog();
       if (ui.tab === 'gruppen') loadGruppen();
       if (ui.view === 'gruppe' && $('gruppeForm').hidden) store.gruppe(ui.gruppe).then(function (d) { if (ui.view === 'gruppe') { gruppeData = d; renderRecord(); } }).catch(function () {});
-      if (authMode === 'discord') api('me').then(function (m) { me = m; isAdmin = !!m.admin; renderMe(); renderRecord(); }).catch(function () {});
+      if (authMode === 'discord') api('me').then(function (m) { me = m; setPerms(m); renderMe(); renderPermUi(); renderRecord(); }).catch(function () {});
+      if (view === 'schicht') loadSchicht();
+      if (view === 'beamte' && !bEdit) loadBeamte();
     }
   }, 20000);
+
+  // ======================================================================
+  // Bereiche: Datenbank, Schicht, Polizei-Register, Rechte
+  // ======================================================================
+  var view = 'db';
+  function renderPermUi() {
+    var server = mode === 'server';
+    var show = {
+      schicht: server && (has('schicht') || has('schicht_alle')),
+      beamte: server && has('register_sehen'),
+      rechte: server && authMode === 'discord' && has('rechte')
+    };
+    $('navSchicht').hidden = !show.schicht; $('navBeamte').hidden = !show.beamte; $('navRechte').hidden = !show.rechte;
+    $('mainNav').hidden = !(show.schicht || show.beamte || show.rechte);
+    if (view !== 'db' && !show[view]) view = 'db';
+    document.querySelectorAll('.nav-btn').forEach(function (b) {
+      var on = b.dataset.view === view;
+      b.classList.toggle('active', on);
+      if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    });
+    $('viewDb').hidden = view !== 'db'; $('viewSchicht').hidden = view !== 'schicht';
+    $('viewBeamte').hidden = view !== 'beamte'; $('viewRechte').hidden = view !== 'rechte';
+    renderTabs(); renderRecord();
+  }
+  function setView(v) {
+    view = v; renderPermUi();
+    if (v === 'schicht') loadSchicht();
+    if (v === 'beamte') loadBeamte();
+    if (v === 'rechte') loadRechte();
+  }
+  document.querySelectorAll('.nav-btn').forEach(function (b) {
+    b.addEventListener('click', function () { setView(b.dataset.view); });
+  });
+
+  // ---------- Schicht ----------
+  var sData = null, mData = null, sWeek = '', sOffset = 0, sBusy = false;
+  function hm(ms) { var m = Math.floor(Math.max(0, ms) / 60000); return Math.floor(m / 60) + ':' + pad(m % 60) + ' h'; }
+  function hms(ms) { var t = Math.floor(Math.max(0, ms) / 1000); return pad(Math.floor(t / 3600)) + ':' + pad(Math.floor(t / 60) % 60) + ':' + pad(t % 60); }
+  function hhmmTs(ts) { var d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function dayName(ts) { var d = new Date(ts); return ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][d.getDay()] + ', ' + pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.'; }
+  // Woche aus dem Montag (YYYY-MM-DD, deutsche Zeit), unabhängig von der Zeitzone des Geräts
+  function weekLabel(w) {
+    var a = new Date(w.key + 'T00:00:00Z'), b = new Date(a.getTime() + 6 * 864e5);
+    return pad(a.getUTCDate()) + '.' + pad(a.getUTCMonth() + 1) + '. bis ' + pad(b.getUTCDate()) + '.' + pad(b.getUTCMonth() + 1) + '.' + b.getUTCFullYear();
+  }
+  // laufende Zeit seit der Server-Antwort dazurechnen
+  function live(sh) {
+    if (!sh) return 0;
+    return sh.dauerMs + (sh.status === 'aktiv' ? Date.now() - sOffset : 0);
+  }
+  function loadSchicht() {
+    var q = sWeek ? '?woche=' + sWeek : '';
+    var jobs = [];
+    // sOffset = Zeitpunkt der Antwort (Uhr dieses Geräts); laufende Zeit zählt ab da weiter
+    if (has('schicht')) jobs.push(api('schicht' + q).then(function (d) { sData = d; sOffset = Date.now(); }));
+    if (has('schicht_alle')) jobs.push(api('schicht/uebersicht' + q).then(function (d) { mData = d; if (!has('schicht')) sOffset = Date.now(); }));
+    return Promise.all(jobs).then(function () { $('sError').textContent = ''; renderSchicht(); })
+      .catch(function (e) { $('sError').textContent = e.message; renderSchicht(); });
+  }
+  function renderSchicht() {
+    var own = has('schicht');
+    var d = sData;
+    var a = own && d ? d.aktiv : null;
+    var label = a ? (a.status === 'pause' ? 'Pause' : 'Im Dienst') : 'Außer Dienst';
+    $('sStatus').className = 'chip ' + (a ? (a.status === 'pause' ? 'chip-amber' : 'chip-green') : '');
+    $('sStatus').textContent = label;
+    $('sClock').textContent = hms(live(a));
+    $('sSub').textContent = !own ? 'Deine Rolle erfasst keine Schichtzeit.' : a ? 'Seit ' + hhmmTs(a.start) + ' Uhr' + (a.pauseMs ? ', Pausen ' + hm(a.pauseMs + (a.status === 'pause' ? Date.now() - sOffset : 0)) : '') : 'Keine laufende Schicht';
+    $('sButtons').innerHTML = !own || !d ? '' : !a
+      ? '<button type="button" class="btn btn-primary" data-schicht="start"' + (sBusy ? ' disabled' : '') + '>Schicht starten</button>'
+      : '<button type="button" class="btn btn-amber" data-schicht="' + (a.status === 'pause' ? 'weiter' : 'pause') + '"' + (sBusy ? ' disabled' : '') + '>' + (a.status === 'pause' ? 'Fortsetzen' : 'Pause') + '</button>' +
+        '<button type="button" class="btn btn-red" data-schicht="ende"' + (sBusy ? ' disabled' : '') + '>Beenden</button>';
+    var w = (d && d.woche) || (mData && mData.woche);
+    $('wLabel').textContent = w ? weekLabel(w) : '';
+    var quote = d ? d.quoteMin : mData ? mData.quoteMin : 0;
+    if (own && d) {
+      var running = d.schichten.reduce(function (acc, x) { return acc + (x.status === 'aktiv' ? Date.now() - sOffset : 0); }, 0);
+      var sum = d.summeMs + running;
+      var pct = quote ? Math.min(100, Math.round(sum / (quote * 60000) * 100)) : 0;
+      $('sWeek').innerHTML = '<div class="week-sum"><span class="mono">' + hm(sum) + '</span>' +
+        (quote ? '<span class="muted"> von ' + hm(quote * 60000) + ' Quote</span>' : '<span class="muted"> (keine Quote festgelegt)</span>') + '</div>' +
+        (quote ? '<div class="bar" role="img" aria-label="' + pct + ' Prozent der Quote"><span style="width:' + pct + '%"></span></div>' +
+          '<span class="small ' + (sum >= quote * 60000 ? 'quote-ok' : 'muted') + '">' + (sum >= quote * 60000 ? 'Quote erfüllt' : 'Noch ' + hm(quote * 60000 - sum)) + '</span>' : '');
+      $('sList').innerHTML = d.schichten.length ? d.schichten.map(function (x) {
+        return '<div class="shift-row"><span><span>' + esc(dayName(x.start)) + '</span><span class="muted small mono">' + hhmmTs(x.start) + ' bis ' + (x.ende ? hhmmTs(x.ende) : 'läuft') + '</span></span>' +
+          '<span class="mono">' + hm(x.dauerMs + (x.status === 'aktiv' ? Date.now() - sOffset : 0)) + '</span></div>';
+      }).join('') : '<span class="empty-note">Keine Schichten in dieser Woche.</span>';
+    } else {
+      $('sWeek').innerHTML = ''; $('sList').innerHTML = '';
+    }
+    // Management
+    var mg = has('schicht_alle');
+    $('mgmtBox').hidden = !mg;
+    $('quoteForm').hidden = !has('quote');
+    if (mg && mData) {
+      var q = mData.quoteMin * 60000;
+      $('mgmtQuote').textContent = mData.quoteMin ? 'Quote ' + hm(q) : 'Keine Quote festgelegt';
+      if (document.activeElement !== $('quoteInput')) $('quoteInput').value = mData.quoteMin ? String(mData.quoteMin / 60) : '';
+      $('mgmtTable').innerHTML = '<thead><tr><th>Beamter</th><th>Zeit</th><th>Quote</th><th>Jetzt</th></tr></thead><tbody>' +
+        (mData.beamte.length ? mData.beamte.map(function (b) {
+          var t = b.summeMs + (b.aktiv && b.aktiv.status === 'aktiv' && b.aktiv.start >= mData.woche.start ? Date.now() - sOffset : 0);
+          return '<tr><td>' + esc(b.name || b.uid) + '</td><td class="mono">' + hm(t) + '</td>' +
+            '<td>' + (q ? (t >= q ? '<span class="quote-ok">erfüllt</span>' : '<span class="muted">fehlt ' + hm(q - t) + '</span>') : '<span class="muted">-</span>') + '</td>' +
+            '<td>' + (b.aktiv ? '<span class="chip ' + (b.aktiv.status === 'pause' ? 'chip-amber' : 'chip-green') + '">' + (b.aktiv.status === 'pause' ? 'Pause' : 'Im Dienst') + '</span> ' +
+              '<button type="button" class="mini mini-danger" data-schicht-end="' + b.aktiv.id + '" data-name="' + esc(b.name || '') + '">Beenden</button>' : '<span class="muted">-</span>') + '</td></tr>';
+        }).join('') : '<tr><td colspan="4" class="muted">Noch keine Schichten erfasst.</td></tr>') + '</tbody>';
+    }
+  }
+  $('sButtons').addEventListener('click', function (ev) {
+    var b = ev.target.closest('[data-schicht]');
+    if (!b || sBusy) return;
+    sBusy = true; renderSchicht();
+    api('schicht', { method: 'POST', body: { aktion: b.dataset.schicht } })
+      .then(function () { sBusy = false; return loadSchicht(); })
+      .catch(function (e) { sBusy = false; $('sError').textContent = e.message; renderSchicht(); });
+  });
+  $('mgmtTable').addEventListener('click', function (ev) {
+    var b = ev.target.closest('[data-schicht-end]');
+    if (!b || !confirm('Schicht von ' + b.dataset.name + ' jetzt beenden?')) return;
+    api('schicht/beenden/' + b.dataset.schichtEnd, { method: 'POST' }).then(loadSchicht)
+      .catch(function (e) { $('mgmtMsg').textContent = e.message; });
+  });
+  $('quoteForm').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var w = (sData && sData.woche) || (mData && mData.woche);
+    api('schicht/quote', { method: 'PUT', body: { woche: w ? w.key : '', stunden: Number($('quoteInput').value) } })
+      .then(function () { $('mgmtMsg').textContent = 'Quote gespeichert.'; $('quoteInput').blur(); return loadSchicht(); })
+      .catch(function (e) { $('mgmtMsg').textContent = e.message; });
+  });
+  $('wPrev').addEventListener('click', function () { var w = (sData || mData || {}).woche; if (w) { sWeek = w.prev; loadSchicht(); } });
+  $('wNext').addEventListener('click', function () { var w = (sData || mData || {}).woche; if (w) { sWeek = w.next; loadSchicht(); } });
+  setInterval(function () { if (view === 'schicht' && !document.hidden) renderSchicht(); }, 1000);
+
+  // ---------- Polizei-Register ----------
+  var bData = null, bSel = null, bEdit = null; // bEdit: null | 'neu' | id
+  function loadBeamte() {
+    return api('beamte').then(function (d) { bData = d; renderBeamte(); })
+      .catch(function (e) { $('bCount').textContent = e.message; });
+  }
+  function ausbList(t) { return String(t || '').split(/\n|,/).map(function (x) { return x.trim(); }).filter(Boolean); }
+  function statusClass(st) { return { 'Aktiv': 'chip-green', 'In Ausbildung': 'chip-blue', 'Beurlaubt': 'chip-amber', 'Suspendiert': 'chip-red' }[st] || ''; }
+  function renderBeamte() {
+    var canEdit = has('register_bearbeiten');
+    $('bNew').hidden = !canEdit || !!bEdit;
+    if (!bData) { $('bCount').textContent = 'Wird geladen'; return; }
+    var q = $('bQ').value.trim().toLowerCase();
+    var list = bData.beamte.filter(function (b) {
+      return !q || [b.name, b.dienstnummer, b.rang, b.discord, b.status, b.ausbildungen].join(' ').toLowerCase().indexOf(q) !== -1;
+    });
+    $('bCount').textContent = list.length + (list.length === 1 ? ' Beamter' : ' Beamte');
+    $('bList').innerHTML = list.length ? list.map(function (b) {
+      return '<button type="button" class="person' + (b.id === bSel ? ' selected' : '') + '" data-bid="' + b.id + '">' +
+        '<span class="avatar">' + esc(initials(b.name)) + '</span>' +
+        '<span class="person-main"><strong>' + esc(b.name) + '</strong><span>' + esc([b.dienstnummer, b.rang].filter(Boolean).join('  ') || '-') + '</span></span>' +
+        '<span class="chip ' + statusClass(b.status) + '">' + esc(b.status) + '</span></button>';
+    }).join('') : '<div class="placeholder">' + (bData.beamte.length ? 'Kein Treffer.' : 'Noch niemand im Register.') + '</div>';
+    var b = bData.beamte.find(function (x) { return x.id === bSel; });
+    $('bFormBox').hidden = !bEdit;
+    $('bDetail').hidden = !!bEdit || !b;
+    if (b && !bEdit) {
+      var ausb = ausbList(b.ausbildungen);
+      $('bDetail').innerHTML = '<div class="row-between"><div><h2 class="gruppe-title">' + esc(b.name) + '</h2>' +
+        '<span class="muted small mono">' + esc([b.dienstnummer, b.discord ? '@' + b.discord : ''].filter(Boolean).join('  ')) + '</span></div>' +
+        '<span class="chip ' + statusClass(b.status) + '">' + esc(b.status) + '</span></div>' +
+        '<dl class="hb-fields"><div><dt>Rang</dt><dd>' + esc(b.rang || '-') + '</dd></div>' +
+        '<div><dt>Eintritt</dt><dd>' + esc(b.eintritt ? b.eintritt.split('-').reverse().join('.') : '-') + '</dd></div>' +
+        '<div class="wide"><dt>Ausbildungen</dt><dd>' + (ausb.length ? '<span class="tags">' + ausb.map(function (a) { return '<span class="tag">' + esc(a) + '</span>'; }).join('') + '</span>' : '-') + '</dd></div>' +
+        (b.notizen ? '<div class="wide"><dt>Notizen</dt><dd class="info-text">' + esc(b.notizen) + '</dd></div>' : '') + '</dl>' +
+        (b.updatedBy ? '<span class="muted small">Zuletzt geändert von ' + esc(b.updatedBy) + (b.updatedAt ? ', ' + esc(dateTime(b.updatedAt)) : '') + '</span>' : '') +
+        (canEdit ? '<div class="hb-form-actions"><button type="button" class="btn-ghost" id="bEditBtn">Bearbeiten</button></div>' : '');
+    }
+  }
+  function openBForm(b) {
+    bEdit = b ? b.id : 'neu';
+    $('bFormTitle').textContent = b ? 'Beamten bearbeiten' : 'Beamten eintragen';
+    $('bStatus').innerHTML = bData.status.map(function (st) { return '<option>' + esc(st) + '</option>'; }).join('');
+    $('bName').value = b ? b.name : ''; $('bNr').value = b ? b.dienstnummer : ''; $('bRang').value = b ? b.rang : '';
+    $('bStatus').value = b ? b.status : 'Aktiv'; $('bDiscord').value = b ? b.discord : ''; $('bEintritt').value = b ? b.eintritt : '';
+    $('bAusb').value = b ? b.ausbildungen : ''; $('bNotizen').value = b ? b.notizen : '';
+    $('bDelete').hidden = !b; $('bError').textContent = '';
+    $('bDiscordNames').innerHTML = (bData.discord || []).map(function (x) { return '<option value="' + esc(x.name) + '">'; }).join('');
+    $('bDiscordUsers').innerHTML = (bData.discord || []).map(function (x) { return '<option value="' + esc(x.username) + '">'; }).join('');
+    $('bRaenge').innerHTML = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(function (n) { return '<option value="A' + n + '">'; }).join('');
+    renderBeamte(); $('bName').focus();
+  }
+  // Discord-Nickname ausgewählt: Discord-Name automatisch ergänzen
+  $('bName').addEventListener('change', function () {
+    var m = ((bData && bData.discord) || []).find(function (x) { return x.name === $('bName').value; });
+    if (m && !$('bDiscord').value) $('bDiscord').value = m.username;
+  });
+  $('bList').addEventListener('click', function (ev) {
+    var el = ev.target.closest('[data-bid]'); if (!el) return;
+    bSel = Number(el.dataset.bid); bEdit = null; renderBeamte();
+  });
+  $('bDetail').addEventListener('click', function (ev) {
+    if (ev.target.id === 'bEditBtn') openBForm(bData.beamte.find(function (x) { return x.id === bSel; }));
+  });
+  $('bNew').addEventListener('click', function () { openBForm(null); });
+  $('bQ').addEventListener('input', renderBeamte);
+  $('bCancel').addEventListener('click', function () { bEdit = null; renderBeamte(); });
+  $('bForm').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var body = { name: $('bName').value.trim(), dienstnummer: $('bNr').value.trim(), rang: $('bRang').value.trim(), status: $('bStatus').value,
+      discord: $('bDiscord').value.trim(), eintritt: $('bEintritt').value, ausbildungen: $('bAusb').value.trim(), notizen: $('bNotizen').value.trim() };
+    var req = bEdit === 'neu' ? api('beamte', { method: 'POST', body: body }) : api('beamte/' + bEdit, { method: 'PUT', body: body });
+    req.then(function (d) { bSel = d.beamter.id; bEdit = null; return loadBeamte(); })
+      .catch(function (e) { $('bError').textContent = e.message; });
+  });
+  $('bDelete').addEventListener('click', function () {
+    var b = bData.beamte.find(function (x) { return x.id === bEdit; });
+    if (!b || !confirm(b.name + ' aus dem Register entfernen?')) return;
+    api('beamte/' + b.id, { method: 'DELETE' }).then(function () { bSel = null; bEdit = null; return loadBeamte(); })
+      .catch(function (e) { $('bError').textContent = e.message; });
+  });
+
+  // ---------- Rechte ----------
+  var rData = null;
+  function loadRechte() {
+    $('rMsg').textContent = '';
+    return api('rechte').then(function (d) { rData = d; renderRechte(); })
+      .catch(function (e) { $('rMsg').textContent = e.message; });
+  }
+  function renderRechte() {
+    if (!rData) return;
+    var rollen = rData.rollen.filter(function (r) { return !r.admin; });
+    $('rTable').innerHTML = '<thead><tr><th class="sticky">Recht</th>' + rollen.map(function (r) {
+      return '<th class="role-col"><span>' + esc(r.name) + '</span></th>';
+    }).join('') + '</tr></thead><tbody>' + rData.perms.map(function (pm) {
+      var set = rData.matrix[pm.key] || [];
+      return '<tr><th class="sticky perm-cell" scope="row"><strong>' + esc(pm.label) + '</strong><span>' + esc(pm.desc || '') + '</span></th>' +
+        rollen.map(function (r) {
+          return '<td class="check-cell"><input type="checkbox" aria-label="' + esc(pm.label + ' für ' + r.name) + '" data-perm="' + pm.key + '" data-role="' + esc(r.id) + '"' + (set.indexOf(r.id) !== -1 ? ' checked' : '') + '></td>';
+        }).join('') + '</tr>';
+    }).join('') + '</tbody>';
+    $('rMsg').textContent = rData.gespeichert ? '' : 'Noch nicht gespeichert: Angezeigt werden die Voreinstellungen nach Rollennamen.';
+  }
+  $('rSave').addEventListener('click', function () {
+    var matrix = {};
+    document.querySelectorAll('#rTable input[data-perm]').forEach(function (c) {
+      matrix[c.dataset.perm] = matrix[c.dataset.perm] || [];
+      if (c.checked) matrix[c.dataset.perm].push(c.dataset.role);
+    });
+    $('rSave').disabled = true;
+    api('rechte', { method: 'PUT', body: { matrix: matrix } }).then(function () {
+      $('rSave').disabled = false; return loadRechte().then(function () { $('rMsg').textContent = 'Gespeichert. Gilt für alle nach spätestens 5 Minuten oder neuem Laden.'; });
+    }).then(loadPerms).catch(function (e) { $('rSave').disabled = false; $('rMsg').textContent = e.message; });
+  });
 
   // ---------- Start ----------
   savePrefs();

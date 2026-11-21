@@ -318,3 +318,65 @@ body.no-officer #hbNewBtn { opacity: 0.45; cursor: not-allowed; }
   background: var(--card); color: var(--text); font-size: 14px; font-family: inherit; resize: vertical;
 }
 #gruppeMembers { max-height: none; min-height: 0; }
+
+/* Bereiche oben */
+.main-nav { display: flex; gap: 4px; flex-wrap: wrap; }
+.nav-btn {
+  min-height: 40px; padding: 0 14px; border-radius: 6px; border: 1px solid transparent; background: none;
+  color: var(--muted); font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.nav-btn:hover { color: var(--text); background: var(--card); }
+.nav-btn.active { color: var(--text); background: var(--accent-bg); border-color: var(--accent); }
+.view[hidden] { display: none !important; }
+
+/* Schicht */
+.clock-box {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 18px 0;
+  border-radius: 8px; background: var(--inset); border: 1px solid var(--line);
+}
+.clock { font-size: 40px; font-weight: 600; letter-spacing: 0.02em; }
+.schicht-buttons { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.schicht-buttons .btn { width: 100%; }
+.btn-amber { background: transparent; border: 1px solid #6B5320; color: var(--amber); }
+.btn-amber:hover { background: #2A2312; }
+.btn-red { background: #2A1215; border: 1px solid #5A2228; color: #FFB3B3; }
+.btn-red:hover { background: #3A1518; }
+.chip-red { background: #3A1518; color: #FFB3B3; }
+.week-nav { display: flex; align-items: center; gap: 6px; }
+.week-nav .btn-ghost { min-height: 36px; padding: 0 10px; }
+.week-sum { font-size: 15px; }
+.week-sum .mono { font-size: 22px; font-weight: 600; }
+.bar { height: 8px; border-radius: 4px; background: var(--inset); border: 1px solid var(--line-soft); overflow: hidden; }
+.bar span { display: block; height: 100%; background: var(--accent); }
+.quote-ok { color: var(--green); font-weight: 600; }
+.shift-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
+.shift-row > span:first-child { display: flex; flex-direction: column; font-size: 14px; }
+.quote-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.quote-row .field { flex: 1 1 200px; }
+
+/* Tabellen */
+.table-scroll { overflow-x: auto; border: 1px solid var(--line-soft); border-radius: 6px; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.data-table th, .data-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
+.data-table thead th { font-size: 12px; color: var(--muted); font-weight: 600; background: var(--inset); white-space: nowrap; }
+.data-table tbody tr:last-child th, .data-table tbody tr:last-child td { border-bottom: 0; }
+
+/* Polizei-Register */
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag { padding: 2px 8px; border-radius: 4px; background: var(--accent-bg); color: #C3D5FF; font-size: 13px; }
+.field-select { min-height: 40px; }
+#bAusb, #bNotizen {
+  padding: 8px 10px; border-radius: 6px; border: 1px solid var(--field); background: var(--card);
+  color: var(--text); font-size: 14px; font-family: inherit; resize: vertical;
+}
+
+/* Rechte */
+.rechte-card { flex: 1 1 100%; min-width: 0; }
+.rechte-table .sticky { position: sticky; left: 0; background: var(--card); z-index: 1; min-width: 240px; }
+.rechte-table thead .sticky { background: var(--inset); }
+.perm-cell { display: table-cell; }
+.perm-cell strong { display: block; font-size: 14px; color: var(--text); }
+.perm-cell span { display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
+.role-col { text-align: center !important; min-width: 64px; }
+.check-cell { text-align: center !important; }
+.check-cell input { width: 20px; height: 20px; accent-color: var(--accent); cursor: pointer; }

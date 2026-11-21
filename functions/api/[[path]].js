@@ -8,7 +8,10 @@
  * Die Tabellen werden beim ersten Aufruf automatisch angelegt.
  */
 
-import { discordConfigured, discordMissing, handleAuth, requireMember, rankLimits, MEMBER_SCHEMA, MEMBER_MIGRATIONS } from '../../lib/discord.js';
+import { discordConfigured, discordMissing, handleAuth, requireMember, noAccess, guildRoleList, MEMBER_SCHEMA, MEMBER_MIGRATIONS } from '../../lib/discord.js';
+import { PERMS, PERM_KEYS, RECHTE_SCHEMA, loadMatrix, permsFor, saveMatrix } from '../../lib/rechte.js';
+import { SCHICHT_SCHEMA, handleSchicht } from '../../lib/schicht.js';
+import { REGISTER_SCHEMA, handleRegister } from '../../lib/register.js';
 
 const STATUSES = ['Sauber', 'Bewährung', 'Fahndung'];
 
@@ -78,6 +81,9 @@ const SCHEMA = [
    )`,
   `CREATE INDEX IF NOT EXISTS log_person ON log(person_num)`,
   MEMBER_SCHEMA,
+  ...RECHTE_SCHEMA,
+  ...SCHICHT_SCHEMA,
+  ...REGISTER_SCHEMA,
   `CREATE TABLE IF NOT EXISTS gruppen (
      name TEXT PRIMARY KEY COLLATE NOCASE,
      beschreibung TEXT,
@@ -217,43 +223,53 @@ export async function onRequest(context) {
   const db = env.DB;
   await ensureSchema(db);
 
-  let isAdmin, officer, canHb = true, canGruppe = true;
+  let officer, uid, perms, roleList = [];
   // Ohne Discord anmelden (Testphase): nur wenn POLIS_KEY noch existiert und der Client ihn mitschickt
   const viaKey = !!env.POLIS_KEY && !!request.headers.get('x-polis-key');
   if (discordConfigured(env) && !viaKey) {
     // --- Anmeldung über Discord: Name und Rollen kommen vom Discord-Server ---
+    const permsOf = async (m) => {
+      roleList = await guildRoleList(env);
+      return permsFor(m, (await loadMatrix(env, db, roleList)).matrix);
+    };
     if (parts[0] === 'auth') {
-      const r = await handleAuth(request, env, db, parts);
+      const r = await handleAuth(request, env, db, parts, async (m) => (await permsOf(m)).has('zugriff'));
       if (r) return r;
     }
     const auth = await requireMember(request, env, db);
     if (auth.error) return auth.error;
+    try { perms = await permsOf(auth.member); } catch (e) { return fail(502, e.message); }
+    if (!perms.has('zugriff')) return noAccess();
     // Schutz gegen fremde Seiten, die mit dem Cookie Änderungen auslösen wollen
     if (method !== 'GET' && request.headers.get('x-polis') !== '1') return fail(403, 'Ungültige Anfrage.');
-    isAdmin = !!auth.member.admin;
-    canHb = isAdmin || (auth.member.rang || 0) >= rankLimits(env).hb;
-    canGruppe = isAdmin || (auth.member.rang || 0) >= rankLimits(env).gruppe;
     officer = { name: auth.member.name || auth.member.username, nr: '@' + auth.member.username };
+    uid = auth.member.uid;
     if (route === 'me') {
-      return json({ name: officer.name, username: auth.member.username, avatar: auth.member.avatar, admin: isAdmin,
-        rang: auth.member.rang || 0, canHb, hbMinRank: rankLimits(env).hb, canGruppe, gruppeMinRank: rankLimits(env).gruppe });
+      return json({ name: officer.name, username: auth.member.username, avatar: auth.member.avatar,
+        admin: perms.has('admin'), perms: [...perms], rang: auth.member.rang || 0 });
     }
   } else {
     // --- Alter Weg: gemeinsamer Dienstschlüssel, Name und Dienstnummer selbst eingetragen ---
     if (!env.POLIS_KEY) return fail(503, 'Dienstschlüssel nicht eingerichtet (Variable „POLIS_KEY“ fehlt).');
     if (!keyMatches(request.headers.get('x-polis-key'), env.POLIS_KEY)) return fail(401, 'Falscher Dienstschlüssel.');
-    isAdmin = keyMatches(request.headers.get('x-polis-admin'), env.POLIS_KEY_ADMIN);
+    const keyAdmin = keyMatches(request.headers.get('x-polis-admin'), env.POLIS_KEY_ADMIN);
+    // Ohne Discord gibt es keine Rollen: alles außer Admin-Funktionen; Admin-Passwort schaltet Management und Admin frei
+    perms = new Set(PERM_KEYS.filter((k) => k !== 'rechte' && (keyAdmin || !['admin', 'schicht_alle', 'quote'].includes(k))));
     if (route === 'auth') return json({ ok: true });
     const dec = (h) => { try { return clean(decodeURIComponent(request.headers.get(h) || ''), 60); } catch { return ''; } };
     officer = { name: dec('x-polis-name'), nr: dec('x-polis-nr').slice(0, 20) };
+    uid = 'key:' + officer.nr.toLowerCase();
+    if (route === 'me') return json({ name: officer.name, admin: perms.has('admin'), perms: [...perms] });
     if (method !== 'GET' && (!officer.name || !officer.nr)) {
       return fail(403, 'Bitte oben Name und Dienstnummer eintragen.');
     }
     // Im Protokoll erkennbar machen, dass der Name nicht von Discord geprüft ist
     if (discordConfigured(env)) officer.nr += ', ohne Discord';
   }
-  const needHb = () => fail(403, 'Haftbefehle bearbeiten darf man erst ab A' + rankLimits(env).hb + '.');
-  const needAdmin = () => fail(403, discordConfigured(env) && !viaKey ? 'Dafür brauchst du die Admin-Rolle auf dem Discord-Server.' : 'Dafür ist das Admin-Passwort nötig.');
+  const can = (k) => perms.has(k);
+  const isAdmin = can('admin');
+  const deny = (k) => fail(403, 'Dafür fehlt dir das Recht „' + (PERMS.find((p) => p.key === k) || { label: k }).label + '“.');
+  const needAdmin = () => deny('admin');
   const beamter = officer.name + ' (' + officer.nr + ')';
   const logIt = (aktion, personNum, details) => db.prepare(
     'INSERT INTO log (ts, beamter_name, beamter_nr, aktion, person_num, details) VALUES (?, ?, ?, ?, ?, ?)'
@@ -262,11 +278,12 @@ export async function onRequest(context) {
   // GET /api/admin – Admin-Passwort prüfen
   if (route === 'admin' && method === 'GET') {
     if (!env.POLIS_KEY_ADMIN) return fail(503, 'Admin-Passwort ist auf dem Server nicht eingerichtet (POLIS_KEY_ADMIN).');
-    return isAdmin ? json({ ok: true }) : fail(401, 'Falsches Admin-Passwort.');
+    return keyMatches(request.headers.get('x-polis-admin'), env.POLIS_KEY_ADMIN) ? json({ ok: true }) : fail(401, 'Falsches Admin-Passwort.');
   }
 
   // GET /api/log?limit=200&person=P-1001
   if (route === 'log' && method === 'GET') {
+    if (!can('protokoll')) return deny('protokoll');
     const sp = new URL(request.url).searchParams;
     const limit = Math.min(500, Math.max(1, Number(sp.get('limit')) || 200));
     const pnum = parseId(sp.get('person'));
@@ -289,6 +306,32 @@ export async function onRequest(context) {
       return u ? json({ exists: true, ...u }) : json({ exists: false });
     } catch {
       return fail(502, 'Roblox ist gerade nicht erreichbar.');
+    }
+  }
+
+  // ---------- Schichtzeit, Polizei-Register, Rechte ----------
+  const ctx = { request, method, parts, db, can, uid, officer, beamter, json, fail, readBody, logIt, clean, url: new URL(request.url) };
+  if (parts[0] === 'schicht') {
+    const r = await handleSchicht(ctx);
+    if (r) return r;
+  }
+  if (parts[0] === 'beamte') {
+    const r = await handleRegister(ctx);
+    if (r) return r;
+  }
+  if (parts[0] === 'rechte') {
+    if (!discordConfigured(env) || viaKey) return fail(400, 'Rechte gibt es nur mit Discord-Anmeldung.');
+    if (!can('rechte')) return deny('rechte');
+    roleList = roleList.length ? roleList : await guildRoleList(env);
+    if (method === 'GET') {
+      const m = await loadMatrix(env, db, roleList);
+      return json({ perms: PERMS, rollen: roleList.map((r) => ({ id: r.id, name: r.name, admin: r.admin })), matrix: m.matrix, gespeichert: m.gespeichert });
+    }
+    if (method === 'PUT') {
+      const b = await readBody(request);
+      await saveMatrix(db, b.matrix || {}, roleList.filter((r) => !r.admin).map((r) => r.id));
+      await logIt('Rechte geändert', null, 'Rechtetabelle gespeichert').run();
+      return json({ ok: true });
     }
   }
 
@@ -329,7 +372,7 @@ export async function onRequest(context) {
 
   // PUT /api/gruppen/:name  { beschreibung }  – ab A6 (bzw. POLIS_GRUPPE_MIN_RANK) oder Admin
   if (parts[0] === 'gruppen' && parts.length === 2 && method === 'PUT') {
-    if (!canGruppe) return fail(403, 'Die Beschreibung von Gruppierungen darf man erst ab A' + rankLimits(env).gruppe + ' ändern.');
+    if (!can('gruppen')) return deny('gruppen');
     const name = clean(parts[1], 60);
     if (!name) return fail(400, 'Name fehlt.');
     const b = await readBody(request);
@@ -370,7 +413,7 @@ export async function onRequest(context) {
 
   // PATCH /api/haftbefehle/:id  { status: 'vollstreckt' | 'aufgehoben' | 'offen', beamter }
   if (parts[0] === 'haftbefehle' && parts.length === 2 && method === 'PATCH') {
-    if (!canHb) return needHb();
+    if (!can('haftbefehle')) return deny('haftbefehle');
     const hid = Number(parts[1]);
     const b = await readBody(request);
     if (!Number.isInteger(hid) || !HB_STATUS.includes(b.status)) return fail(400, 'Ungültiger Status.');
@@ -400,6 +443,7 @@ export async function onRequest(context) {
 
     // POST /api/people  { roblox, name, beamter }
     if (parts.length === 1 && method === 'POST') {
+      if (!can('personen')) return deny('personen');
       const b = await readBody(request);
       const handle = clean(b.roblox, 30).replace(/^@+/, '');
       if (!HANDLE_RE.test(handle)) return fail(400, 'Ungültiger Roblox-Name.');
@@ -429,6 +473,8 @@ export async function onRequest(context) {
       const b = await readBody(request);
       const status = STATUSES.includes(b.status) ? b.status : person.status;
       const danger = typeof b.danger === 'boolean' ? (b.danger ? 1 : 0) : person.danger;
+      if ((status !== person.status || danger !== person.danger) && !can('personen')) return deny('personen');
+      if ((b.gruppe != null || b.gruppeRang != null || b.beschreibung != null) && !can('beschreibung')) return deny('beschreibung');
       let name = person.name, roblox = person.roblox, robloxId = person.roblox_id;
       if (b.name != null || b.roblox != null) {
         if (!isAdmin) return needAdmin();
@@ -486,7 +532,7 @@ export async function onRequest(context) {
 
     // POST /api/people/:id/haftbefehle  { kennzeichen, modell, grund, beweise, beamter }
     if (parts.length === 3 && parts[2] === 'haftbefehle' && method === 'POST') {
-      if (!canHb) return needHb();
+      if (!can('haftbefehle')) return deny('haftbefehle');
       const b = await readBody(request);
       const grund = clean(b.grund, 200);
       if (!grund) return fail(400, 'Grund fehlt.');
@@ -509,6 +555,7 @@ export async function onRequest(context) {
 
     // POST /api/people/:id/akte  { entries: [{delikt, geld, haft}], beamter, datum }
     if (parts.length === 3 && parts[2] === 'akte' && method === 'POST') {
+      if (!can('strafen')) return deny('strafen');
       const b = await readBody(request);
       const entries = Array.isArray(b.entries) ? b.entries.slice(0, 30) : [];
       if (!entries.length) return fail(400, 'Keine Delikte ausgewählt.');
@@ -531,6 +578,7 @@ export async function onRequest(context) {
 
     // PATCH /api/people/:id/akte  { erledigt: true } – alle offenen Strafen erledigt
     if (parts.length === 3 && parts[2] === 'akte' && method === 'PATCH') {
+      if (!can('strafen')) return deny('strafen');
       const b = await readBody(request);
       if (b.erledigt !== true) return fail(400, 'Nur „erledigt: true“ möglich.');
       const r = await db.prepare('UPDATE akte SET erledigt = 1 WHERE person_num = ? AND erledigt = 0').bind(num).run();
@@ -541,6 +589,7 @@ export async function onRequest(context) {
 
     // /api/people/:id/akte/:eintrag
     if (parts.length === 4 && parts[2] === 'akte') {
+      if (method !== 'GET' && !can('strafen')) return deny('strafen');
       const eid = Number(parts[3]);
       if (!Number.isInteger(eid)) return fail(404, 'Eintrag nicht gefunden.');
       const row = await db.prepare('SELECT * FROM akte WHERE id = ? AND person_num = ?').bind(eid, num).first();

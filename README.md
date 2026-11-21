@@ -16,17 +16,11 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 
 - **Admin** (Knopf „Admin“ oben, Passwort = Secret `POLIS_KEY_ADMIN`): RP-Name und Roblox-Namen einer Person ändern (neuer Account wird bei Roblox geprüft), auch erledigte Strafen löschen, Haftbefehle löschen, Personen mit allen Einträgen löschen. Alles landet mit „(Admin)“ im Protokoll. Das Admin-Passwort gilt nur bis der Tab geschlossen wird.
 
+- **Schicht** (oben „Schicht“): Schicht starten, Pause, Fortsetzen, Beenden. Jeder sieht seine eigene Zeit pro Woche (Montag bis Sonntag, deutsche Zeit) und den Stand zur Wochenquote. Das Management sieht alle Beamten, kann vergessene Schichten beenden und die Wochenquote festlegen (gilt ab der gewählten Woche, bis eine neue festgelegt wird). Code: `lib/schicht.js`.
+- **Polizei-Register** (oben „Polizei-Register“): Beamte mit Dienstnummer, Rang, Status, Discord-Name, Eintritt, Ausbildungen und Notizen; bearbeiten z. B. für Ausbilder. Code: `lib/register.js`.
+
 ## Anmeldung mit Discord
-Sobald die Discord-Secrets gesetzt sind, meldet man sich mit Discord an statt mit Dienstschlüssel und selbst eingetragenem Namen. Der Bot liest vom Discord-Server den **Server-Nickname** und die **Rollen** (über ihre Namen):
-
-| Rolle | Rechte |
-|---|---|
-| A1 bis A10 | Zugriff, Personen anlegen, Strafen vergeben, Haftbefehle ansehen |
-| ab A4 | zusätzlich Haftbefehle ausstellen, vollstrecken, aufheben |
-| ab A6 | zusätzlich Beschreibung von Gruppierungen ändern |
-| Datenbank Admin | alles, auch ohne A-Rolle: Personen bearbeiten/löschen, Strafen und Haftbefehle löschen |
-
-Grenzen änderbar per Secret `POLIS_MIN_RANK` (Standard 1), `POLIS_HB_MIN_RANK` (Standard 4), Admin-Rollenname per `POLIS_ADMIN_ROLE_NAME`. Im Protokoll steht der Nickname (mit Dienstnummer) und der Discord-Name. Rollen werden höchstens alle 5 Minuten neu geprüft; wer die Rolle verliert, fliegt danach raus. Code: `lib/discord.js`.
+Sobald die Discord-Secrets gesetzt sind, meldet man sich mit Discord an statt mit Dienstschlüssel und selbst eingetragenem Namen. Der Bot liest vom Discord-Server den **Server-Nickname** und die **Rollen**. Was welche Rolle darf, wird auf der Seite **Rechte** festgelegt (Tabelle Recht × Rolle, nur für Datenbank Admin bzw. wer das Recht „Rechte verwalten“ hat). Die Rolle „Datenbank Admin“ hat immer alle Rechte. Solange die Tabelle nie gespeichert wurde, gelten Voreinstellungen nach Rollennamen: Zugriff, Personen, Strafen, Beschreibungen, Protokoll, Schichtzeit und Register ansehen ab A1, Haftbefehle ab A4, Gruppierungen beschreiben ab A6, Register bearbeiten für Rollen mit „Ausbilder“ im Namen; Management (Schichtzeiten aller, Wochenquote) und Admin nur Datenbank Admin. Code: `lib/rechte.js`. Im Protokoll steht der Nickname (mit Dienstnummer) und der Discord-Name. Rollen werden höchstens alle 5 Minuten neu geprüft; wer die Rolle verliert, fliegt danach raus. Code: `lib/discord.js`.
 
 Einrichtung:
 1. [Discord Developer Portal](https://discord.com/developers/applications) → *New Application*.
@@ -83,6 +77,13 @@ Mit Discord-Anmeldung: Sitzungs-Cookie `polis_session` (über `/api/auth/discord
 | DELETE | `/api/haftbefehle/:id` | Haftbefehl löschen (Admin) |
 | GET | `/api/gruppen` | Alle Gruppierungen mit Mitgliederzahl |
 | GET / PUT | `/api/gruppen/:name` | Beschreibung und Mitglieder / Beschreibung ändern (ab A6) |
+| GET / POST | `/api/schicht` | Eigene Schicht und Woche (`?woche=YYYY-MM-DD`) / `{ aktion: start, pause, weiter, ende }` |
+| GET | `/api/schicht/uebersicht` | Alle Beamten der Woche (Management) |
+| POST | `/api/schicht/beenden/:id` | Fremde Schicht beenden (Management) |
+| PUT | `/api/schicht/quote` | `{ woche, stunden }` Wochenquote festlegen |
+| GET / POST | `/api/beamte` | Polizei-Register lesen / Beamten eintragen |
+| PUT / DELETE | `/api/beamte/:id` | Eintrag ändern / entfernen |
+| GET / PUT | `/api/rechte` | Rechtetabelle lesen / speichern (`{ matrix: { recht: [rollenIds] } }`) |
 | GET | `/api/roblox/:name` | Roblox-Account nachschlagen |
 | GET | `/api/avatar/:robloxId` | Weiterleitung auf das Roblox-Avatarbild |
 
