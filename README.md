@@ -10,6 +10,8 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 
 - **Haftbefehle**: bei der Person ausstellen (Kennzeichen, Auto Modell, Grund, Beweise; ausgestellt von = eigener Name). Offene Haftbefehle stehen im Tab „Haftbefehle“ und als roter Balken bei der Person. Status: offen, vollstreckt, aufgehoben. „Für Discord kopieren“ erzeugt den Text im Discord-Format; der Teamtag pingt die Rolle @Präsidium-Team (`TEAMTAG` in `app.js`, Rollen-ID 1476650119700156618).
 
+- **Protokoll**: Jede Änderung (Person angelegt/geändert, Strafe vergeben/erledigt/entfernt, Haftbefehl ausgestellt/vollstreckt/aufgehoben) wird mit Name, Dienstnummer und Uhrzeit gespeichert und ist im Tab „Protokoll“ durchsuchbar. Ohne Name und Dienstnummer oben kann man nichts eintragen; die API lehnt Änderungen ohne die Header `x-polis-name` und `x-polis-nr` ab.
+
 ## Hosting
 Statische Seite (`index.html`, `style.css`, `app.js`) plus API in `functions/api/` (Cloudflare Pages Functions). Kein Build-Schritt.
 
@@ -29,7 +31,7 @@ Die Tabellen werden beim ersten Aufruf automatisch angelegt. Jeder Push auf `mai
 Settings → Pages → *Deploy from a branch* → `main` / `(root)`.
 
 ## API (`/api`)
-Alle Endpunkte außer `health` und `avatar` brauchen den Header `x-polis-key`.
+Alle Endpunkte außer `health` und `avatar` brauchen den Header `x-polis-key`. Ändernde Anfragen (POST, PATCH, DELETE) zusätzlich `x-polis-name` und `x-polis-nr` (URL-kodiert); sie landen im Protokoll.
 
 | Methode | Pfad | Zweck |
 |---|---|---|
@@ -44,6 +46,7 @@ Alle Endpunkte außer `health` und `avatar` brauchen den Header `x-polis-key`.
 | GET / POST | `/api/people/:id/haftbefehle` | Haftbefehle einer Person / neuen ausstellen (`grund` Pflicht) |
 | GET | `/api/haftbefehle?status=offen` | Alle Haftbefehle (optional nach Status) |
 | PATCH | `/api/haftbefehle/:id` | `status`: `offen`, `vollstreckt`, `aufgehoben` |
+| GET | `/api/log?limit=200&person=P-1001` | Protokoll (optional nur eine Person) |
 | GET | `/api/roblox/:name` | Roblox-Account nachschlagen |
 | GET | `/api/avatar/:robloxId` | Weiterleitung auf das Roblox-Avatarbild |
 

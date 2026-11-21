@@ -63,7 +63,17 @@ const SCHEMA = [
      closed_by TEXT
    )`,
   `CREATE INDEX IF NOT EXISTS hb_person ON haftbefehle(person_num)`,
-  `CREATE INDEX IF NOT EXISTS hb_status ON haftbefehle(status)`
+  `CREATE INDEX IF NOT EXISTS hb_status ON haftbefehle(status)`,
+  `CREATE TABLE IF NOT EXISTS log (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     ts INTEGER NOT NULL,
+     beamter_name TEXT NOT NULL,
+     beamter_nr TEXT NOT NULL,
+     aktion TEXT NOT NULL,
+     person_num INTEGER,
+     details TEXT
+   )`,
+  `CREATE INDEX IF NOT EXISTS log_person ON log(person_num)`
 ];
 const HB_STATUS = ['offen', 'vollstreckt', 'aufgehoben'];
 function hbOut(r) {
@@ -182,6 +192,33 @@ export async function onRequest(context) {
   // GET /api/auth – Schlüssel prüfen
   if (route === 'auth') return json({ ok: true });
 
+  // Wer schreibt? Name und Dienstnummer kommen aus den Headern (URL-kodiert).
+  const dec = (h) => { try { return clean(decodeURIComponent(request.headers.get(h) || ''), 60); } catch { return ''; } };
+  const officer = { name: dec('x-polis-name'), nr: dec('x-polis-nr').slice(0, 20) };
+  const beamter = officer.name + ' (' + officer.nr + ')';
+  if (method !== 'GET' && (!officer.name || !officer.nr)) {
+    return fail(403, 'Bitte oben Name und Dienstnummer eintragen.');
+  }
+  const logIt = (aktion, personNum, details) => db.prepare(
+    'INSERT INTO log (ts, beamter_name, beamter_nr, aktion, person_num, details) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(Date.now(), officer.name, officer.nr, aktion, personNum ?? null, clean(details, 300) || null);
+
+  // GET /api/log?limit=200&person=P-1001
+  if (route === 'log' && method === 'GET') {
+    const sp = new URL(request.url).searchParams;
+    const limit = Math.min(500, Math.max(1, Number(sp.get('limit')) || 200));
+    const pnum = parseId(sp.get('person'));
+    const base = `SELECT l.*, p.name AS p_name, p.roblox AS p_roblox FROM log l LEFT JOIN people p ON p.num = l.person_num`;
+    const q = pnum != null
+      ? db.prepare(base + ' WHERE l.person_num = ? ORDER BY l.id DESC LIMIT ?').bind(pnum, limit)
+      : db.prepare(base + ' ORDER BY l.id DESC LIMIT ?').bind(limit);
+    const { results } = await q.all();
+    return json({ log: results.map((r) => ({
+      id: r.id, ts: r.ts, name: r.beamter_name, nr: r.beamter_nr, aktion: r.aktion, details: r.details || '',
+      personId: r.person_num != null ? 'P-' + (1000 + r.person_num) : null, personName: r.p_name || '', roblox: r.p_roblox || ''
+    })) });
+  }
+
   // GET /api/roblox/:name
   if (parts[0] === 'roblox' && parts.length === 2 && method === 'GET') {
     if (!HANDLE_RE.test(parts[1])) return fail(400, 'Ungültiger Roblox-Name.');
@@ -208,10 +245,12 @@ export async function onRequest(context) {
     const hid = Number(parts[1]);
     const b = await readBody(request);
     if (!Number.isInteger(hid) || !HB_STATUS.includes(b.status)) return fail(400, 'Ungültiger Status.');
-    const closed = b.status === 'offen' ? [null, null] : [Date.now(), clean(b.beamter, 60) || 'Unbekannt'];
-    const row = await db.prepare('UPDATE haftbefehle SET status = ?, closed_at = ?, closed_by = ? WHERE id = ? RETURNING id')
+    const closed = b.status === 'offen' ? [null, null] : [Date.now(), beamter];
+    const row = await db.prepare('UPDATE haftbefehle SET status = ?, closed_at = ?, closed_by = ? WHERE id = ? RETURNING id, person_num, grund')
       .bind(b.status, closed[0], closed[1], hid).first();
     if (!row) return fail(404, 'Haftbefehl nicht gefunden.');
+    const verb = { offen: 'wieder geöffnet', vollstreckt: 'vollstreckt', aufgehoben: 'aufgehoben' }[b.status];
+    await logIt('Haftbefehl ' + verb, row.person_num, row.grund).run();
     const full = await db.prepare(HB_SELECT + ' WHERE h.id = ?').bind(hid).first();
     return json({ haftbefehl: hbOut(full) });
   }
@@ -246,7 +285,8 @@ export async function onRequest(context) {
       const row = await db.prepare(
         `INSERT INTO people (name, roblox, roblox_id, status, danger, created_at, created_by)
          VALUES (?, ?, ?, 'Sauber', 0, ?, ?) RETURNING *`
-      ).bind(name, u.name, u.id, Date.now(), clean(b.beamter, 60)).first();
+      ).bind(name, u.name, u.id, Date.now(), beamter).first();
+      await logIt('Person angelegt', row.num, '@' + u.name + (name !== u.name ? ' als ' + name : '')).run();
       return json({ person: personOut(row) }, 201);
     }
 
@@ -263,6 +303,11 @@ export async function onRequest(context) {
       const name = b.name != null && clean(b.name, 60) ? clean(b.name, 60) : person.name;
       const row = await db.prepare('UPDATE people SET status = ?, danger = ?, name = ? WHERE num = ? RETURNING *')
         .bind(status, danger, name, num).first();
+      const changes = [];
+      if (status !== person.status) changes.push('Status: ' + person.status + ' zu ' + status);
+      if (danger !== person.danger) changes.push(danger ? 'als gefährlich markiert' : 'nicht mehr gefährlich');
+      if (name !== person.name) changes.push('Name: ' + person.name + ' zu ' + name);
+      if (changes.length) await logIt('Person geändert', num, changes.join(', ')).run();
       return json({ person: personOut(row) });
     }
 
@@ -280,7 +325,8 @@ export async function onRequest(context) {
       const ins = await db.prepare(
         `INSERT INTO haftbefehle (person_num, kennzeichen, modell, grund, beweise, ausgestellt_von, created_at, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'offen') RETURNING id`
-      ).bind(num, clean(b.kennzeichen, 20), clean(b.modell, 60), grund, clean(b.beweise, 500), clean(b.beamter, 100) || 'Unbekannt', Date.now()).first();
+      ).bind(num, clean(b.kennzeichen, 20), clean(b.modell, 60), grund, clean(b.beweise, 500), beamter, Date.now()).first();
+      await logIt('Haftbefehl ausgestellt', num, grund).run();
       const full = await db.prepare(HB_SELECT + ' WHERE h.id = ?').bind(ins.id).first();
       return json({ haftbefehl: hbOut(full) }, 201);
     }
@@ -299,7 +345,6 @@ export async function onRequest(context) {
       const entries = Array.isArray(b.entries) ? b.entries.slice(0, 30) : [];
       if (!entries.length) return fail(400, 'Keine Delikte ausgewählt.');
       const datum = clean(b.datum, 20) || new Date().toISOString().slice(0, 10);
-      const beamter = clean(b.beamter, 60) || 'Unbekannt';
       const now = Date.now();
       const rows = [];
       for (const e of entries) {
@@ -311,6 +356,7 @@ export async function onRequest(context) {
       const stmts = rows.map(([delikt, geld, haft]) => db.prepare(
         'INSERT INTO akte (person_num, delikt, geld, haft, datum, beamter, created_at, erledigt) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
       ).bind(num, delikt, geld, haft, datum, beamter, now));
+      rows.forEach(([delikt, geld, haft]) => stmts.push(logIt('Strafe vergeben', num, delikt + ': ' + geld.toLocaleString('de-DE') + ' €, ' + haft + ' Min.')));
       await db.batch(stmts);
       return json({ ok: true, added: stmts.length }, 201);
     }
@@ -320,6 +366,8 @@ export async function onRequest(context) {
       const b = await readBody(request);
       if (b.erledigt !== true) return fail(400, 'Nur „erledigt: true“ möglich.');
       const r = await db.prepare('UPDATE akte SET erledigt = 1 WHERE person_num = ? AND erledigt = 0').bind(num).run();
+      const n = r.meta ? r.meta.changes : 0;
+      if (n) await logIt('Strafen erledigt', num, n === 1 ? '1 ausstehende Strafe' : n + ' ausstehende Strafen').run();
       return json({ ok: true, changed: r.meta ? r.meta.changes : null });
     }
 
@@ -334,12 +382,14 @@ export async function onRequest(context) {
         const b = await readBody(request);
         if (typeof b.erledigt !== 'boolean') return fail(400, 'Feld „erledigt“ fehlt.');
         await db.prepare('UPDATE akte SET erledigt = ? WHERE id = ?').bind(b.erledigt ? 1 : 0, eid).run();
+        await logIt(b.erledigt ? 'Strafe erledigt' : 'Strafe wieder ausstehend', num, row.delikt).run();
         return json({ ok: true });
       }
       // DELETE – nur offene Einträge (z. B. Fehlklick)
       if (method === 'DELETE') {
         if (row.erledigt) return fail(409, 'Erledigte Einträge können nicht gelöscht werden.');
         await db.prepare('DELETE FROM akte WHERE id = ?').bind(eid).run();
+        await logIt('Strafe entfernt', num, row.delikt + ': ' + Number(row.geld).toLocaleString('de-DE') + ' €, ' + row.haft + ' Min.').run();
         return json({ ok: true });
       }
     }

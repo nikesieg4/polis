@@ -92,6 +92,8 @@
   function migrateLocal() {
     local.nextEntry = local.nextEntry || 1;
     local.haftbefehle = local.haftbefehle || [];
+    local.log = local.log || [];
+    local.nextLog = local.nextLog || 1;
     local.nextHb = local.nextHb || 1;
     Object.keys(local.akten).forEach(function (pid) {
       local.akten[pid].forEach(function (e) {
@@ -106,7 +108,20 @@
     return (local.akten[pid] || []).find(function (e) { return e.id === eid; });
   }
 
+  function llog(aktion, pid, details) {
+    var o = prefs.officer || {};
+    local.log.unshift({ id: local.nextLog++, ts: Date.now(), name: o.name, nr: o.nr, aktion: aktion, personId: pid || null, details: details || '' });
+    local.log = local.log.slice(0, 500);
+  }
+  function localName(pid) { var p = local.people.find(function (x) { return x.id === pid; }); return p || {}; }
+
   var LocalStore = {
+    log: function () {
+      return Promise.resolve(local.log.map(function (l) {
+        var p = localName(l.personId);
+        return Object.assign({}, l, { personName: p.name || '', roblox: p.roblox || '' });
+      }));
+    },
     list: function () {
       return Promise.resolve(local.people.map(function (p) {
         var a = local.akten[p.id] || [];
@@ -118,12 +133,19 @@
     create: function (handle, name) {
       var id = 'P-' + local.nextId++;
       var p = { id: id, name: name || '@' + handle, roblox: handle, status: 'Sauber', danger: false };
-      local.people.unshift(p); local.akten[id] = []; saveLocal();
+      local.people.unshift(p); local.akten[id] = []; llog('Person angelegt', id, '@' + handle + (name ? ' als ' + name : '')); saveLocal();
       return Promise.resolve(Object.assign({ count: 0 }, p));
     },
     update: function (id, patch) {
       var p = local.people.find(function (x) { return x.id === id; });
-      if (p) { Object.assign(p, patch); saveLocal(); }
+      if (p) {
+        var ch = [];
+        if (patch.status != null && patch.status !== p.status) ch.push('Status: ' + p.status + ' zu ' + patch.status);
+        if (patch.danger != null && patch.danger !== p.danger) ch.push(patch.danger ? 'als gefährlich markiert' : 'nicht mehr gefährlich');
+        Object.assign(p, patch);
+        if (ch.length) llog('Person geändert', id, ch.join(', '));
+        saveLocal();
+      }
       return Promise.resolve(p);
     },
     addEntries: function (id, entries) {
@@ -132,19 +154,27 @@
         var c = KATALOG.find(function (k) { return k.para === x.para; });
         return { id: local.nextEntry++, delikt: c.para + ' ' + c.name, geld: c.geld[0], haft: c.haft[0], datum: d, beamter: by, erledigt: 0 };
       });
-      local.akten[id] = rows.concat(local.akten[id] || []); saveLocal();
+      local.akten[id] = rows.concat(local.akten[id] || []);
+      rows.forEach(function (r) { llog('Strafe vergeben', id, r.delikt + ': ' + euro(r.geld) + ', ' + r.haft + ' Min.'); });
+      saveLocal();
       return Promise.resolve();
     },
     setDone: function (id, eid, done) {
-      var e = localEntry(id, eid); if (e) { e.erledigt = done ? 1 : 0; saveLocal(); }
+      var e = localEntry(id, eid); if (e) { e.erledigt = done ? 1 : 0; llog(done ? 'Strafe erledigt' : 'Strafe wieder ausstehend', id, e.delikt); saveLocal(); }
       return Promise.resolve();
     },
     allDone: function (id) {
-      (local.akten[id] || []).forEach(function (e) { e.erledigt = 1; }); saveLocal();
+      var n = 0;
+      (local.akten[id] || []).forEach(function (e) { if (!e.erledigt) n++; e.erledigt = 1; });
+      if (n) llog('Strafen erledigt', id, n === 1 ? '1 ausstehende Strafe' : n + ' ausstehende Strafen');
+      saveLocal();
       return Promise.resolve();
     },
     remove: function (id, eid) {
-      local.akten[id] = (local.akten[id] || []).filter(function (e) { return e.id !== eid || e.erledigt; }); saveLocal();
+      var gone = localEntry(id, eid);
+      local.akten[id] = (local.akten[id] || []).filter(function (e) { return e.id !== eid || e.erledigt; });
+      if (gone && !gone.erledigt) llog('Strafe entfernt', id, gone.delikt + ': ' + euro(gone.geld) + ', ' + gone.haft + ' Min.');
+      saveLocal();
       return Promise.resolve();
     },
     hbWithPerson: function (h) {
@@ -160,12 +190,16 @@
     hbCreate: function (id, d) {
       var h = { id: local.nextHb++, personId: id, kennzeichen: d.kennzeichen, modell: d.modell, grund: d.grund, beweise: d.beweise,
         ausgestelltVon: d.beamter, createdAt: Date.now(), status: 'offen', closedAt: null, closedBy: '' };
-      local.haftbefehle.unshift(h); saveLocal();
+      local.haftbefehle.unshift(h); llog('Haftbefehl ausgestellt', id, d.grund); saveLocal();
       return Promise.resolve(LocalStore.hbWithPerson(h));
     },
     hbSet: function (hid, status) {
       var h = local.haftbefehle.find(function (x) { return x.id === hid; });
-      if (h) { h.status = status; h.closedAt = status === 'offen' ? null : Date.now(); h.closedBy = status === 'offen' ? '' : officerLabel(); saveLocal(); }
+      if (h) {
+        h.status = status; h.closedAt = status === 'offen' ? null : Date.now(); h.closedBy = status === 'offen' ? '' : officerLabel();
+        llog('Haftbefehl ' + { offen: 'wieder geöffnet', vollstreckt: 'vollstreckt', aufgehoben: 'aufgehoben' }[status], h.personId, h.grund);
+        saveLocal();
+      }
       return Promise.resolve();
     }
   };
@@ -174,7 +208,8 @@
   var key = lsGet(KEY_STORE) || '';
   function api(path, opts) {
     opts = opts || {};
-    var headers = { 'x-polis-key': key };
+    var o = prefs.officer || {};
+    var headers = { 'x-polis-key': key, 'x-polis-name': encodeURIComponent(o.name || ''), 'x-polis-nr': encodeURIComponent(o.nr || '') };
     if (opts.body) headers['content-type'] = 'application/json';
     return fetch('/api/' + path, { method: opts.method || 'GET', headers: headers, body: opts.body ? JSON.stringify(opts.body) : undefined })
       .then(function (r) {
@@ -206,6 +241,7 @@
     remove: function (id, eid) {
       return api('people/' + encodeURIComponent(id) + '/akte/' + eid, { method: 'DELETE' });
     },
+    log: function () { return api('log?limit=300').then(function (d) { return d.log; }); },
     hbOpen: function () { return api('haftbefehle?status=offen').then(function (d) { return d.haftbefehle; }); },
     hbForPerson: function (id) { return api('people/' + encodeURIComponent(id) + '/haftbefehle').then(function (d) { return d.haftbefehle; }); },
     hbCreate: function (id, d) {
@@ -223,6 +259,12 @@
   var akten = {};          // id -> Array (geladen) | undefined
   var ui = { q: '', sq: '', selId: null, msg: '', busy: false, error: '', createError: '', loading: true, tab: 'personen', hbMsg: '' };
   var hbOpenList = [];   // alle offenen Haftbefehle
+  var logList = null;    // Protokoll (null = noch nicht geladen)
+  function officerOk() { var o = prefs.officer || {}; return !!(o.name && o.nr); }
+  function loadLog() {
+    return store.log().then(function (l) { logList = l; if (ui.tab === 'log') renderResults(); })
+      .catch(function (e) { ui.error = e.message; if (ui.tab === 'log') renderResults(); });
+  }
   var hbByPerson = {};   // personId -> Array
 
   function findPerson(id) { return people.find(function (p) { return p.id === id; }) || null; }
@@ -252,11 +294,29 @@
     return { q: raw.replace(/^@+/, ''), isAt: raw.charAt(0) === '@' };
   }
   function renderTabs() {
-    var hb = ui.tab === 'hb';
-    $('tabPersonen').classList.toggle('active', !hb); $('tabPersonen').setAttribute('aria-selected', String(!hb));
-    $('tabHb').classList.toggle('active', hb); $('tabHb').setAttribute('aria-selected', String(hb));
+    [['tabPersonen', 'personen'], ['tabHb', 'hb'], ['tabLog', 'log']].forEach(function (t) {
+      var on = ui.tab === t[1];
+      $(t[0]).classList.toggle('active', on); $(t[0]).setAttribute('aria-selected', String(on));
+    });
     $('hbCount').textContent = hbOpenList.length ? String(hbOpenList.length) : '';
-    $('results').hidden = hb; $('create').hidden = hb; $('hbResults').hidden = !hb;
+    $('results').hidden = ui.tab !== 'personen'; $('create').hidden = ui.tab !== 'personen';
+    $('hbResults').hidden = ui.tab !== 'hb'; $('logResults').hidden = ui.tab !== 'log';
+  }
+  function renderLogResults() {
+    var q = ui.q.trim().toLowerCase().replace(/^@+/, '');
+    if (!logList) { $('count').textContent = 'Wird geladen'; $('logResults').innerHTML = ''; return; }
+    var list = logList.filter(function (l) {
+      if (!q) return true;
+      return [l.name, l.nr, l.aktion, l.details, l.personName, l.roblox, l.personId].join(' ').toLowerCase().indexOf(q) !== -1;
+    });
+    $('count').textContent = list.length + (list.length === 1 ? ' Eintrag' : ' Einträge') + ' im Protokoll';
+    $('logResults').innerHTML = list.length ? list.map(function (l) {
+      var who = l.personId ? '<button type="button" class="log-person" data-action="select" data-id="' + esc(l.personId) + '">' +
+        esc(l.personName || l.personId) + (l.roblox ? ' (@' + esc(l.roblox) + ')' : '') + '</button>' : '';
+      return '<div class="log-row"><div class="log-top"><strong>' + esc(l.aktion) + '</strong><span>' + esc(dateTime(l.ts)) + '</span></div>' +
+        (who || l.details ? '<div class="log-what">' + who + (who && l.details ? ': ' : '') + esc(l.details) + '</div>' : '') +
+        '<div class="log-by">' + esc(l.name || '?') + ' (' + esc(l.nr || '?') + ')</div></div>';
+    }).join('') : '<div class="placeholder">Keine Einträge im Protokoll.</div>';
   }
   function renderHbResults() {
     var pq = parseQuery(), q = pq.q;
@@ -276,6 +336,7 @@
   function renderResults() {
     renderTabs();
     if (ui.tab === 'hb' && !ui.loading) { renderHbResults(); return; }
+    if (ui.tab === 'log' && !ui.loading) { renderLogResults(); return; }
     var pq = parseQuery(), q = pq.q;
     if (ui.loading) {
       $('count').textContent = 'Wird geladen';
@@ -484,11 +545,13 @@
     setTimeout(function () { $('gateKey').focus(); }, 0);
   }
   function enterServer() {
+    logList = null;
     mode = 'server'; store = ServerStore; people = []; akten = {}; ui.loading = true; ui.selId = null;
     renderMode(); renderResults(); renderRecord();
     refreshPeople().then(function () { loadAkte(ui.selId); loadHb(ui.selId); });
   }
   function enterLocal() {
+    logList = null;
     mode = 'local'; store = LocalStore; ui.loading = true;
     renderMode();
     refreshPeople().then(function () { loadAkte(ui.selId); loadHb(ui.selId); });
@@ -585,6 +648,7 @@
   $('q').addEventListener('input', function (ev) { ui.q = ev.target.value; ui.createError = ''; renderResults(); });
   $('tabPersonen').addEventListener('click', function () { ui.tab = 'personen'; renderResults(); });
   $('tabHb').addEventListener('click', function () { ui.tab = 'hb'; renderResults(); });
+  $('tabLog').addEventListener('click', function () { ui.tab = 'log'; renderResults(); loadLog(); });
   $('hbNewBtn').addEventListener('click', function () {
     $('hbForm').hidden = false; $('hbNewBtn').hidden = true; $('hbFormError').textContent = '';
     $('hbGrund').focus();
@@ -624,8 +688,36 @@
   var officerName = $('officerName'), officerNr = $('officerNr');
   officerName.value = (prefs.officer && prefs.officer.name) || '';
   officerNr.value = (prefs.officer && prefs.officer.nr) || '';
-  function saveOfficer() { prefs.officer = { name: officerName.value.trim().slice(0, 40), nr: officerNr.value.trim().slice(0, 20) }; savePrefs(); }
+  function saveOfficer() { prefs.officer = { name: officerName.value.trim().slice(0, 40), nr: officerNr.value.trim().slice(0, 20) }; savePrefs(); renderOfficer(); }
+  function renderOfficer() {
+    var o = prefs.officer || {};
+    var ok = officerOk();
+    document.body.classList.toggle('no-officer', !ok);
+    $('officerWarn').hidden = ok;
+    officerName.classList.toggle('missing', !o.name);
+    officerNr.classList.toggle('missing', !o.nr);
+  }
+  var WRITE_ACTIONS = ['create', 'give', 'all-done', 'done', 'remove', 'hb-set'];
+  function blockIfNoOfficer(ev) {
+    if (officerOk()) return false;
+    ev.preventDefault(); ev.stopImmediatePropagation();
+    var warn = $('officerWarn');
+    warn.hidden = false; warn.classList.remove('shake'); void warn.offsetWidth; warn.classList.add('shake');
+    ((prefs.officer || {}).name ? officerNr : officerName).focus();
+    return true;
+  }
+  document.addEventListener('click', function (ev) {
+    var el = ev.target.closest('[data-action], #hbNewBtn');
+    if (!el) return;
+    if (el.id === 'hbNewBtn' || WRITE_ACTIONS.indexOf(el.dataset.action) !== -1) blockIfNoOfficer(ev);
+  }, true);
+  document.addEventListener('change', function (ev) {
+    var a = ev.target.dataset && ev.target.dataset.action;
+    if ((a === 'status' || a === 'danger') && blockIfNoOfficer(ev)) renderRecord();
+  }, true);
+  $('hbForm').addEventListener('submit', function (ev) { blockIfNoOfficer(ev); }, true);
   officerName.addEventListener('input', saveOfficer);
+  renderOfficer();
   officerNr.addEventListener('input', saveOfficer);
 
   $('resetBtn').addEventListener('click', function () {
@@ -638,6 +730,7 @@
   setInterval(function () {
     if (mode === 'server' && !document.hidden && $('gate').hidden) {
       refreshPeople(); if (ui.selId) { loadAkte(ui.selId, true); loadHb(ui.selId); }
+      if (ui.tab === 'log') loadLog();
     }
   }, 20000);
 

@@ -248,3 +248,29 @@ h3 { font-size: 14px; font-weight: 600; }
 .hb-vollstreckt { background: #10301F; color: var(--green) !important; }
 .hb-aufgehoben { background: var(--line-soft); color: var(--text-2) !important; }
 .hb-msg { display: block; }
+
+/* Name und Dienstnummer Pflicht */
+.officer-warn {
+  padding: 10px 24px; background: #2A2312; border-bottom: 1px solid #6B5320; color: var(--amber); font-size: 14px;
+}
+.officer-warn.shake { animation: shake 0.3s; }
+@keyframes shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+@media (prefers-reduced-motion: reduce) { .officer-warn.shake { animation: none; } }
+.officer-field input.missing { border-color: #6B5320; }
+body.no-officer .strafe-btn,
+body.no-officer [data-action="create"],
+body.no-officer [data-action="all-done"],
+body.no-officer [data-action="done"],
+body.no-officer [data-action="remove"],
+body.no-officer [data-action="hb-set"],
+body.no-officer #hbNewBtn { opacity: 0.45; cursor: not-allowed; }
+
+/* Protokoll */
+.log-row { padding: 10px 12px; border-radius: 6px; background: var(--inset); border: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 3px; }
+.log-top { display: flex; justify-content: space-between; gap: 10px; }
+.log-top strong { font-size: 14px; font-weight: 600; }
+.log-top span { font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
+.log-what { font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
+.log-by { font-size: 12px; color: var(--muted); }
+.log-person { background: none; border: 0; padding: 0; color: #8FB4FF; font: inherit; cursor: pointer; text-align: left; }
+.log-person:hover { text-decoration: underline; }
