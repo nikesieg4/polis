@@ -187,6 +187,34 @@ async function robloxLookup(handle) {
   return u ? { id: u.id, name: u.name, displayName: u.displayName } : null;
 }
 
+// Roblox-Namenssuche für die Vorschläge im Suchfeld (5 Minuten zwischengespeichert)
+const sucheCache = new Map();
+async function robloxSuche(q) {
+  const key = q.toLowerCase();
+  const hit = sucheCache.get(key);
+  if (hit && Date.now() - hit.at < 5 * 60 * 1000) return hit.data;
+  let users = [];
+  const r = await fetch('https://users.roblox.com/v1/users/search?limit=10&keyword=' + encodeURIComponent(q));
+  if (r.ok) {
+    users = ((await r.json()).data || []).map((u) => ({ id: u.id, name: u.name, displayName: u.displayName }));
+  } else {
+    // Suche gesperrt oder überlastet: wenigstens den exakten Namen prüfen
+    const u = HANDLE_RE.test(q) ? await robloxLookup(q).catch(() => null) : null;
+    if (u) users = [u];
+  }
+  if (users.length) {
+    try {
+      const t = await fetch('https://thumbnails.roblox.com/v1/users/avatar-headshot?size=48x48&format=Png&isCircular=false&userIds=' + users.map((u) => u.id).join(','));
+      const img = {};
+      ((await t.json()).data || []).forEach((x) => { img[x.targetId] = x.imageUrl; });
+      users.forEach((u) => { u.avatar = img[u.id] || ''; });
+    } catch { /* ohne Bilder */ }
+  }
+  if (sucheCache.size > 300) sucheCache.clear();
+  sucheCache.set(key, { at: Date.now(), data: users });
+  return users;
+}
+
 async function readBody(request) {
   try { return await request.json(); } catch { return {}; }
 }
@@ -305,6 +333,21 @@ export async function onRequest(context) {
       id: r.id, ts: r.ts, name: r.beamter_name, nr: r.beamter_nr, aktion: r.aktion, details: r.details || '',
       personId: r.person_num != null ? 'P-' + (1000 + r.person_num) : null, personName: r.p_name || '', roblox: r.p_roblox || ''
     })) });
+  }
+
+  // GET /api/roblox/suche?q=… – Roblox-Accounts für die Vorschläge, mit Avatar und ob schon erfasst
+  if (route === 'roblox/suche' && method === 'GET') {
+    const q = clean(new URL(request.url).searchParams.get('q'), 20).replace(/^@+/, '');
+    if (!/^[A-Za-z0-9_.]{3,20}$/.test(q)) return json({ accounts: [] });
+    let users;
+    try { users = await robloxSuche(q); } catch { return fail(502, 'Roblox ist gerade nicht erreichbar.'); }
+    const known = {};
+    if (users.length) {
+      const { results } = await db.prepare('SELECT num, roblox_id FROM people WHERE roblox_id IN (' + users.map(() => '?').join(',') + ')')
+        .bind(...users.map((u) => u.id)).all();
+      results.forEach((r) => { known[r.roblox_id] = 'P-' + (1000 + r.num); });
+    }
+    return json({ accounts: users.map((u) => ({ ...u, personId: known[u.id] || null })) });
   }
 
   // GET /api/roblox/:name

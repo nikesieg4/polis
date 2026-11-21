@@ -950,20 +950,7 @@
       if (!findPerson(ui.selId)) { refreshPeople(); }
       renderResults(); renderRecord(); loadAkte(ui.selId, mode === 'server'); loadHb(ui.selId);
     } else if (a === 'create') {
-      var handle = $('create').dataset.handle;
-      if (!handle || ui.busy) return;
-      var name = ($('newName') && $('newName').value.trim().slice(0, 60)) || '';
-      ui.busy = true; ui.createError = ''; renderResults();
-      store.create(handle, name).then(function (p) {
-        ui.busy = false;
-        if (!findPerson(p.id)) people.unshift(p);
-        akten[p.id] = akten[p.id] || [];
-        hbByPerson[p.id] = hbByPerson[p.id] || [];
-        ui.selId = p.id; ui.msg = '';
-        ui.q = '@' + p.roblox; $('q').value = ui.q;
-        renderResults(); renderRecord();
-        if (mode === 'server') loadAkte(p.id, true);
-      }).catch(function (e) { ui.busy = false; ui.createError = e.message; renderResults(); });
+      createPerson($('create').dataset.handle, ($('newName') && $('newName').value.trim().slice(0, 60)) || '');
     } else if (a === 'give') {
       var p = findPerson(ui.selId);
       var c = KATALOG.find(function (k) { return k.para === el.dataset.para; });
@@ -1089,8 +1076,122 @@
       if (btns.length === 1) btns[0].click();
     }
   });
+  function selectPerson(id) {
+    ui.view = 'person'; ui.tab = 'personen'; ui.edit = null;
+    if (ui.selId !== id) closeHbForm();
+    ui.selId = id; ui.msg = ''; ui.error = ''; ui.hbMsg = '';
+    renderResults(); renderRecord(); loadAkte(id, mode === 'server'); loadHb(id);
+  }
+
+  // ---------- Vorschläge beim Tippen (Personensuche) ----------
+  var sug = { items: [], active: -1, timer: null, seq: 0, roblox: [], q: '' };
+  function sugAvatar(url, name) {
+    return '<span class="avatar sug-avatar">' + (url ? '<img src="' + esc(url) + '" alt="" loading="lazy">' : esc(initials(name))) + '</span>';
+  }
+  function closeSuggest() {
+    $('suggest').hidden = true; $('q').setAttribute('aria-expanded', 'false'); $('q').removeAttribute('aria-activedescendant');
+    sug.active = -1;
+  }
+  function renderSuggest() {
+    var raw = $('q').value.trim(), q = raw.toLowerCase().replace(/^@+/, '');
+    if (q.length < 2 || ui.tab !== 'personen') { closeSuggest(); return; }
+    var db = people.filter(function (p) {
+      return p.roblox.toLowerCase().indexOf(q) !== -1 || p.name.toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 5);
+    var dbIds = {}; db.forEach(function (p) { dbIds[p.id] = true; });
+    var rb = sug.q === q ? sug.roblox.filter(function (u) { return !u.personId || !dbIds[u.personId]; }).slice(0, 8) : [];
+    sug.items = db.map(function (p) { return { type: 'person', id: p.id }; })
+      .concat(rb.map(function (u) { return u.personId ? { type: 'person', id: u.personId } : { type: 'roblox', name: u.name }; }));
+    var i = -1, html = '';
+    if (db.length) {
+      html += '<div class="sug-head">In der Datenbank</div>' + db.map(function (p) {
+        i++;
+        return '<div class="sug-item" role="option" id="sug' + i + '" data-i="' + i + '">' + sugAvatar(p.robloxId ? '/api/avatar/' + p.robloxId : '', p.name) +
+          '<span class="person-main"><strong>' + esc(p.name) + '</strong><span>@' + esc(p.roblox) + '</span></span>' +
+          (p.haftbefehle ? '<span class="person-hb">Haftbefehl</span>' : '') + '<span class="chip ' + chipClass(p.status) + '">' + esc(p.status) + '</span></div>';
+      }).join('');
+    }
+    if (mode === 'server' && q.length >= 3) {
+      html += '<div class="sug-head">Roblox-Accounts' + (sug.q !== q ? ' <span class="muted">(suche …)</span>' : '') + '</div>';
+      if (sug.q === q && !rb.length) html += '<div class="sug-empty">Kein weiterer Roblox-Account gefunden.</div>';
+      html += rb.map(function (u) {
+        i++;
+        var tag = u.personId ? '<span class="sug-tag">erfasst</span>' : has('personen') ? '<span class="sug-tag sug-new">anlegen</span>' : '';
+        return '<div class="sug-item" role="option" id="sug' + i + '" data-i="' + i + '">' + sugAvatar(u.avatar, u.name) +
+          '<span class="person-main"><strong>' + esc(u.displayName || u.name) + '</strong><span>@' + esc(u.name) + '</span></span>' + tag + '</div>';
+      }).join('');
+    }
+    if (!html) { closeSuggest(); return; }
+    $('suggest').innerHTML = html;
+    $('suggest').hidden = false; $('q').setAttribute('aria-expanded', 'true');
+    if (sug.active >= sug.items.length) sug.active = -1;
+    markActive();
+  }
+  function markActive() {
+    document.querySelectorAll('#suggest .sug-item').forEach(function (el) {
+      var on = Number(el.dataset.i) === sug.active;
+      el.classList.toggle('active', on); el.setAttribute('aria-selected', String(on));
+      if (on) { $('q').setAttribute('aria-activedescendant', el.id); el.scrollIntoView({ block: 'nearest' }); }
+    });
+  }
+  function pickSuggest(i) {
+    var it = sug.items[i];
+    if (!it) return;
+    closeSuggest();
+    if (it.type === 'person') {
+      if (!findPerson(it.id)) { refreshPeople().then(function () { selectPerson(it.id); }); return; }
+      selectPerson(it.id);
+    } else if (has('personen')) {
+      if (blockIfNoOfficer({ preventDefault: function () {}, stopImmediatePropagation: function () {} })) return;
+      ui.q = '@' + it.name; $('q').value = ui.q; renderResults();
+      createPerson(it.name.toLowerCase(), '');
+    } else {
+      ui.q = '@' + it.name; $('q').value = ui.q; renderResults();
+    }
+  }
+  function querySuggest() {
+    var q = $('q').value.trim().toLowerCase().replace(/^@+/, '');
+    clearTimeout(sug.timer);
+    renderSuggest();
+    if (mode !== 'server' || !/^[a-z0-9_.]{3,20}$/.test(q) || sug.q === q) return;
+    var my = ++sug.seq;
+    sug.timer = setTimeout(function () {
+      api('roblox/suche?q=' + encodeURIComponent(q)).then(function (d) {
+        if (my !== sug.seq) return; // inzwischen weitergetippt
+        sug.q = q; sug.roblox = d.accounts || []; renderSuggest();
+      }).catch(function () { if (my === sug.seq) { sug.q = q; sug.roblox = []; renderSuggest(); } });
+    }, 300);
+  }
+  $('suggest').addEventListener('mousedown', function (ev) {
+    var el = ev.target.closest('.sug-item'); if (!el) return;
+    ev.preventDefault(); pickSuggest(Number(el.dataset.i));
+  });
+  $('q').addEventListener('input', querySuggest);
+  $('q').addEventListener('focus', renderSuggest);
+  $('q').addEventListener('blur', function () { setTimeout(closeSuggest, 150); });
+
+  function createPerson(handle, name) {
+      if (!handle || ui.busy) return;
+      ui.busy = true; ui.createError = ''; renderResults();
+      store.create(handle, name).then(function (p) {
+        ui.busy = false;
+        if (!findPerson(p.id)) people.unshift(p);
+        akten[p.id] = akten[p.id] || [];
+        hbByPerson[p.id] = hbByPerson[p.id] || [];
+        ui.selId = p.id; ui.msg = ''; ui.view = 'person';
+        ui.q = '@' + p.roblox; $('q').value = ui.q;
+        renderResults(); renderRecord();
+        if (mode === 'server') loadAkte(p.id, true);
+      }).catch(function (e) { ui.busy = false; ui.createError = e.message; renderResults(); });
+  }
+
   $('q').addEventListener('keydown', function (ev) {
+    var open = !$('suggest').hidden && sug.items.length;
+    if (ev.key === 'ArrowDown' && open) { ev.preventDefault(); sug.active = (sug.active + 1) % sug.items.length; markActive(); return; }
+    if (ev.key === 'ArrowUp' && open) { ev.preventDefault(); sug.active = sug.active <= 0 ? sug.items.length - 1 : sug.active - 1; markActive(); return; }
+    if (ev.key === 'Escape' && open) { closeSuggest(); return; }
     if (ev.key === 'Enter') {
+      if (open && sug.active >= 0) { ev.preventDefault(); pickSuggest(sug.active); return; }
       var btn = $('create').querySelector('[data-action="create"]');
       if (btn) btn.click();
     }

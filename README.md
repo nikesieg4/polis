@@ -5,7 +5,7 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 > **Testversion.** Auf Cloudflare Pages teilen sich alle Beamten eine Datenbank (Cloudflare D1), geschützt durch einen gemeinsamen Dienstschlüssel. Auf GitHub Pages (ohne Server) läuft die Seite im lokalen Modus: Daten nur im eigenen Browser.
 
 ## Funktionen
-- **Personensuche** (links): Suche nach RP-Name, Personen-ID oder `@RobloxName`. Unbekannte Spieler lassen sich direkt anlegen; der Account wird bei Roblox geprüft und der Avatar angezeigt.
+- **Personensuche** (links): Suche nach RP-Name oder Roblox-Name. Schon beim Tippen erscheinen Vorschläge mit Avatar: passende Personen aus der Datenbank und passende Roblox-Accounts (ab 3 Zeichen, über die Roblox-Suche). Ein Klick bzw. Pfeiltasten + Enter öffnet die Akte oder legt den Roblox-Account direkt als Person an.
 - **Strafregister** (rechts): Strafe suchen (z. B. „Raub“ oder „8“) und anklicken, die Person bekommt sie sofort mit der Mindeststrafe aus dem Strafgesetzbuch (§ 1 bis 10). Oben steht, was **ausstehend** ist (Geld und Haftzeit); mit „Erledigt“ wird es abgehakt. Ausstehende Strafen lassen sich mit „Anpassen“ innerhalb der Spanne des Paragraphen erhöhen (Geld und Haftzeit, wird protokolliert) oder bei einem Fehlklick entfernen.
 
 - **Beschreibung** pro Person: Gruppierung (z. B. Kartell), Rang in der Gruppierung und freier Text. Jeder Beamte darf sie ändern, Änderungen stehen im Protokoll. Die Personensuche findet auch Gruppierungen; ein Klick auf die Gruppierung zeigt alle Mitglieder.
@@ -86,6 +86,7 @@ Mit Discord-Anmeldung: Sitzungs-Cookie `polis_session` (über `/api/auth/discord
 | GET / POST | `/api/beamte` | Polizei-Register lesen / Beamten eintragen |
 | PUT / DELETE | `/api/beamte/:id` | Eintrag ändern / entfernen |
 | GET / PUT | `/api/rechte` | Rechtetabelle lesen / speichern (`{ matrix: { recht: [rollenIds] } }`) |
+| GET | `/api/roblox/suche?q=` | Roblox-Accounts für die Vorschläge, mit Avatar und ob schon erfasst |
 | GET | `/api/roblox/:name` | Roblox-Account nachschlagen |
 | GET | `/api/avatar/:robloxId` | Weiterleitung auf das Roblox-Avatarbild |
 
