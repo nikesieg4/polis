@@ -13,7 +13,10 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 ## Hosting
 Statische Seite (`index.html`, `style.css`, `app.js`) plus API in `functions/api/` (Cloudflare Pages Functions). Kein Build-Schritt.
 
-### Cloudflare Pages (mit geteilter Datenbank)
+### Cloudflare Workers (aktuell genutzt)
+`wrangler.jsonc` + `worker.js`: Der Worker liefert die Dateien aus und leitet `/api/*` an `functions/api/[[path]].js`. Die D1-Datenbank wird in `wrangler.jsonc` unter `d1_databases` eingetragen (Binding `DB`). Der Dienstschlüssel `POLIS_KEY` wird im Dashboard als **Secret** gesetzt (Worker → Settings → Variables and Secrets). Jeder Push auf `main` wird automatisch gebaut.
+
+### Cloudflare Pages (Alternative)
 1. **D1-Datenbank anlegen:** Workers & Pages → D1 → *Create database* → Name z. B. `polis-db`.
 2. **Pages-Projekt verbinden:** Workers & Pages → Create → Pages → *Connect to Git* → dieses Repo. Production branch `main`, Build command leer, Build output directory `/`.
 3. **Datenbank verbinden:** Pages-Projekt → Settings → Bindings → *Add* → D1 database. Variable name **`DB`**, Datenbank `polis-db`.
