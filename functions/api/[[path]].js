@@ -178,7 +178,7 @@ function safeEqual(a, b) {
 async function robloxLookup(handle) {
   const r = await fetch('https://users.roblox.com/v1/usernames/users', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'user-agent': 'Mozilla/5.0 (compatible; POLIS-Datenbank)' },
     body: JSON.stringify({ usernames: [handle], excludeBannedUsers: false })
   });
   if (!r.ok) throw new Error('roblox ' + r.status);
@@ -187,32 +187,49 @@ async function robloxLookup(handle) {
   return u ? { id: u.id, name: u.name, displayName: u.displayName } : null;
 }
 
-// Roblox-Namenssuche für die Vorschläge im Suchfeld (5 Minuten zwischengespeichert)
+// Roblox-Namenssuche für die Vorschläge im Suchfeld.
+// Roblox drosselt Anfragen aus Rechenzentren oft; deshalb mehrere Wege nacheinander:
+// 1. users/v1/users/search  2. search-api/omni-search (die Suche der Roblox-Webseite)  3. exakter Name
+const RBX_HEADERS = { 'user-agent': 'Mozilla/5.0 (compatible; POLIS-Datenbank)', accept: 'application/json' };
 const sucheCache = new Map();
 async function robloxSuche(q) {
   const key = q.toLowerCase();
   const hit = sucheCache.get(key);
-  if (hit && Date.now() - hit.at < 5 * 60 * 1000) return hit.data;
-  let users = [];
-  const r = await fetch('https://users.roblox.com/v1/users/search?limit=10&keyword=' + encodeURIComponent(q));
-  if (r.ok) {
-    users = ((await r.json()).data || []).map((u) => ({ id: u.id, name: u.name, displayName: u.displayName }));
-  } else {
-    // Suche gesperrt oder überlastet: wenigstens den exakten Namen prüfen
-    const u = HANDLE_RE.test(q) ? await robloxLookup(q).catch(() => null) : null;
+  if (hit && Date.now() - hit.at < hit.ttl) return hit.data;
+  let users = [], quelle = '';
+  try {
+    const r = await fetch('https://users.roblox.com/v1/users/search?limit=10&keyword=' + encodeURIComponent(q), { headers: RBX_HEADERS });
+    if (r.ok) { users = ((await r.json()).data || []).map((u) => ({ id: u.id, name: u.name, displayName: u.displayName })); quelle = 'suche'; }
+  } catch { /* nächster Weg */ }
+  if (!users.length) {
+    try {
+      const r = await fetch('https://apis.roblox.com/search-api/omni-search?verticalType=user&pageToken=&globalSessionId=polis&sessionId=polis&searchQuery=' + encodeURIComponent(q), { headers: RBX_HEADERS });
+      if (r.ok) {
+        const d = await r.json();
+        users = (d.searchResults || []).flatMap((g) => g.contents || []).filter((c) => c.contentType === 'User')
+          .slice(0, 10).map((c) => ({ id: c.contentId, name: c.username, displayName: c.displayName }));
+        if (users.length) quelle = 'omni';
+      }
+    } catch { /* nächster Weg */ }
+  }
+  if (!users.length && HANDLE_RE.test(q)) {
+    const u = await robloxLookup(q).catch(() => null);
     if (u) users = [u];
+    quelle = 'exakt';
   }
   if (users.length) {
     try {
-      const t = await fetch('https://thumbnails.roblox.com/v1/users/avatar-headshot?size=48x48&format=Png&isCircular=false&userIds=' + users.map((u) => u.id).join(','));
+      const t = await fetch('https://thumbnails.roblox.com/v1/users/avatar-headshot?size=48x48&format=Png&isCircular=false&userIds=' + users.map((u) => u.id).join(','), { headers: RBX_HEADERS });
       const img = {};
       ((await t.json()).data || []).forEach((x) => { img[x.targetId] = x.imageUrl; });
       users.forEach((u) => { u.avatar = img[u.id] || ''; });
     } catch { /* ohne Bilder */ }
   }
+  const data = { users, quelle };
   if (sucheCache.size > 300) sucheCache.clear();
-  sucheCache.set(key, { at: Date.now(), data: users });
-  return users;
+  // Volle Suchergebnisse 5 Minuten merken, Notfall-Ergebnisse nur 30 Sekunden
+  sucheCache.set(key, { at: Date.now(), ttl: quelle === 'exakt' ? 30 * 1000 : 5 * 60 * 1000, data });
+  return data;
 }
 
 async function readBody(request) {
@@ -339,15 +356,15 @@ export async function onRequest(context) {
   if (route === 'roblox/suche' && method === 'GET') {
     const q = clean(new URL(request.url).searchParams.get('q'), 20).replace(/^@+/, '');
     if (!/^[A-Za-z0-9_.]{3,20}$/.test(q)) return json({ accounts: [] });
-    let users;
-    try { users = await robloxSuche(q); } catch { return fail(502, 'Roblox ist gerade nicht erreichbar.'); }
+    let users, quelle;
+    try { ({ users, quelle } = await robloxSuche(q)); } catch { return fail(502, 'Roblox ist gerade nicht erreichbar.'); }
     const known = {};
     if (users.length) {
       const { results } = await db.prepare('SELECT num, roblox_id FROM people WHERE roblox_id IN (' + users.map(() => '?').join(',') + ')')
         .bind(...users.map((u) => u.id)).all();
       results.forEach((r) => { known[r.roblox_id] = 'P-' + (1000 + r.num); });
     }
-    return json({ accounts: users.map((u) => ({ ...u, personId: known[u.id] || null })) });
+    return json({ quelle, accounts: users.map((u) => ({ ...u, personId: known[u.id] || null })) });
   }
 
   // GET /api/roblox/:name

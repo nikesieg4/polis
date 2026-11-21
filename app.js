@@ -1113,7 +1113,8 @@
     }
     if (mode === 'server' && q.length >= 3) {
       html += '<div class="sug-head">Roblox-Accounts' + (sug.q !== q ? ' <span class="muted">(suche …)</span>' : '') + '</div>';
-      if (sug.q === q && !rb.length) html += '<div class="sug-empty">Kein weiterer Roblox-Account gefunden.</div>';
+      if (sug.q === q && sug.quelle === 'exakt') html += '<div class="sug-empty">Die Roblox-Suche antwortet gerade nicht, deshalb wird nur der exakt getippte Name geprüft.</div>';
+      else if (sug.q === q && !rb.length) html += '<div class="sug-empty">Kein weiterer Roblox-Account gefunden.</div>';
       html += rb.map(function (u) {
         i++;
         var tag = u.personId ? '<span class="sug-tag">erfasst</span>' : has('personen') ? '<span class="sug-tag sug-new">anlegen</span>' : '';
@@ -1158,7 +1159,7 @@
     sug.timer = setTimeout(function () {
       api('roblox/suche?q=' + encodeURIComponent(q)).then(function (d) {
         if (my !== sug.seq) return; // inzwischen weitergetippt
-        sug.q = q; sug.roblox = d.accounts || []; renderSuggest();
+        sug.q = q; sug.roblox = d.accounts || []; sug.quelle = d.quelle || ''; renderSuggest();
       }).catch(function () { if (my === sug.seq) { sug.q = q; sug.roblox = []; renderSuggest(); } });
     }, 300);
   }
