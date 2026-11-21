@@ -10,3 +10,4 @@ wrangler.toml
 .gitignore
 README.md
 CLAUDE.md
+lib

@@ -14,6 +14,22 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 
 - **Admin** (Knopf „Admin“ oben, Passwort = Secret `POLIS_KEY_ADMIN`): RP-Name und Roblox-Namen einer Person ändern (neuer Account wird bei Roblox geprüft), auch erledigte Strafen löschen, Haftbefehle löschen, Personen mit allen Einträgen löschen. Alles landet mit „(Admin)“ im Protokoll. Das Admin-Passwort gilt nur bis der Tab geschlossen wird.
 
+## Anmeldung mit Discord
+Sobald die Discord-Secrets gesetzt sind, meldet man sich mit Discord an statt mit Dienstschlüssel und selbst eingetragenem Namen. Der Bot liest vom Discord-Server den **Server-Nickname** und die **Rollen**: Rein kommt nur, wer eine Polizei-Rolle hat; Admin ist, wer eine Admin-Rolle hat. Im Protokoll steht der Nickname (mit Dienstnummer) und der Discord-Name. Rollen werden höchstens alle 5 Minuten neu geprüft; wer die Rolle verliert, fliegt danach raus. Code: `lib/discord.js`.
+
+Einrichtung:
+1. [Discord Developer Portal](https://discord.com/developers/applications) → *New Application*.
+2. **OAuth2** → *Redirects* → `https://<deine-worker-adresse>/api/auth/discord/callback` eintragen (genau so, mit `https`).
+3. **Bot** → *Reset Token* → Token kopieren. Bot auf den Server einladen: OAuth2 → URL Generator → Scope `bot`, keine Rechte → Link öffnen.
+4. Im Worker unter Settings → Variables and Secrets als **Secret** anlegen:
+   - `DISCORD_CLIENT_ID` (OAuth2 → Client ID)
+   - `DISCORD_CLIENT_SECRET` (OAuth2 → Client Secret)
+   - `DISCORD_BOT_TOKEN`
+   - `DISCORD_GUILD_ID` (Rechtsklick auf den Server → Server-ID kopieren, Entwicklermodus nötig)
+   - `POLIS_ROLE_IDS` (Rollen mit Zugriff, mehrere mit Komma)
+   - `POLIS_ADMIN_ROLE_IDS` (Admin-Rollen, optional)
+5. Neu deployen. Ab dann gelten `POLIS_KEY` und `POLIS_KEY_ADMIN` nicht mehr und können gelöscht werden.
+
 ## Hosting
 Statische Seite (`index.html`, `style.css`, `app.js`) plus API in `functions/api/` (Cloudflare Pages Functions). Kein Build-Schritt.
 
@@ -33,7 +49,7 @@ Die Tabellen werden beim ersten Aufruf automatisch angelegt. Jeder Push auf `mai
 Settings → Pages → *Deploy from a branch* → `main` / `(root)`.
 
 ## API (`/api`)
-Alle Endpunkte außer `health` und `avatar` brauchen den Header `x-polis-key`. Ändernde Anfragen (POST, PATCH, DELETE) zusätzlich `x-polis-name` und `x-polis-nr` (URL-kodiert); sie landen im Protokoll.
+Mit Discord-Anmeldung: Sitzungs-Cookie `polis_session` (über `/api/auth/discord/login`), ändernde Anfragen zusätzlich Header `x-polis: 1`; `/api/me` liefert Nickname, Discord-Name und Admin-Status, `POST /api/auth/logout` meldet ab. Ohne Discord (alter Weg): alle Endpunkte außer `health` und `avatar` brauchen den Header `x-polis-key`. Ändernde Anfragen (POST, PATCH, DELETE) zusätzlich `x-polis-name` und `x-polis-nr` (URL-kodiert); sie landen im Protokoll.
 
 | Methode | Pfad | Zweck |
 |---|---|---|

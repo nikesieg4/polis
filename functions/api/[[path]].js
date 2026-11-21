@@ -8,6 +8,8 @@
  * Die Tabellen werden beim ersten Aufruf automatisch angelegt.
  */
 
+import { discordConfigured, handleAuth, requireMember, MEMBER_SCHEMA } from '../../lib/discord.js';
+
 const STATUSES = ['Sauber', 'Bewährung', 'Fahndung'];
 
 // Strafgesetzbuch: Spannen [min, max]. Muss zu KATALOG in app.js passen.
@@ -74,7 +76,8 @@ const SCHEMA = [
      person_num INTEGER,
      details TEXT
    )`,
-  `CREATE INDEX IF NOT EXISTS log_person ON log(person_num)`
+  `CREATE INDEX IF NOT EXISTS log_person ON log(person_num)`,
+  MEMBER_SCHEMA
 ];
 const HB_STATUS = ['offen', 'vollstreckt', 'aufgehoben'];
 function hbOut(r) {
@@ -175,7 +178,8 @@ export async function onRequest(context) {
 
   // --- Öffentlich: Status ---
   if (route === 'health') {
-    return json({ ok: true, db: !!env.DB, keySet: !!env.POLIS_KEY, adminSet: !!env.POLIS_KEY_ADMIN });
+    const discord = discordConfigured(env);
+    return json({ ok: true, db: !!env.DB, auth: discord ? 'discord' : 'key', keySet: discord || !!env.POLIS_KEY, adminSet: !discord && !!env.POLIS_KEY_ADMIN });
   }
 
   // --- Öffentlich: Avatarbild (nur Weiterleitung auf Roblox-CDN) ---
@@ -193,26 +197,40 @@ export async function onRequest(context) {
     }
   }
 
-  // --- Ab hier: Dienstschlüssel nötig ---
   if (!env.DB) return fail(503, 'Datenbank nicht verbunden (D1-Binding „DB“ fehlt).');
-  if (!env.POLIS_KEY) return fail(503, 'Dienstschlüssel nicht eingerichtet (Variable „POLIS_KEY“ fehlt).');
-  if (!keyMatches(request.headers.get('x-polis-key'), env.POLIS_KEY)) return fail(401, 'Falscher Dienstschlüssel.');
-
   const db = env.DB;
   await ensureSchema(db);
-  const isAdmin = keyMatches(request.headers.get('x-polis-admin'), env.POLIS_KEY_ADMIN);
-  const needAdmin = () => fail(403, 'Dafür ist das Admin-Passwort nötig.');
 
-  // GET /api/auth – Schlüssel prüfen
-  if (route === 'auth') return json({ ok: true });
-
-  // Wer schreibt? Name und Dienstnummer kommen aus den Headern (URL-kodiert).
-  const dec = (h) => { try { return clean(decodeURIComponent(request.headers.get(h) || ''), 60); } catch { return ''; } };
-  const officer = { name: dec('x-polis-name'), nr: dec('x-polis-nr').slice(0, 20) };
-  const beamter = officer.name + ' (' + officer.nr + ')';
-  if (method !== 'GET' && (!officer.name || !officer.nr)) {
-    return fail(403, 'Bitte oben Name und Dienstnummer eintragen.');
+  let isAdmin, officer;
+  if (discordConfigured(env)) {
+    // --- Anmeldung über Discord: Name und Rollen kommen vom Discord-Server ---
+    if (parts[0] === 'auth') {
+      const r = await handleAuth(request, env, db, parts);
+      if (r) return r;
+    }
+    const auth = await requireMember(request, env, db);
+    if (auth.error) return auth.error;
+    // Schutz gegen fremde Seiten, die mit dem Cookie Änderungen auslösen wollen
+    if (method !== 'GET' && request.headers.get('x-polis') !== '1') return fail(403, 'Ungültige Anfrage.');
+    isAdmin = !!auth.member.admin;
+    officer = { name: auth.member.name || auth.member.username, nr: '@' + auth.member.username };
+    if (route === 'me') {
+      return json({ name: officer.name, username: auth.member.username, avatar: auth.member.avatar, admin: isAdmin });
+    }
+  } else {
+    // --- Alter Weg: gemeinsamer Dienstschlüssel, Name und Dienstnummer selbst eingetragen ---
+    if (!env.POLIS_KEY) return fail(503, 'Dienstschlüssel nicht eingerichtet (Variable „POLIS_KEY“ fehlt).');
+    if (!keyMatches(request.headers.get('x-polis-key'), env.POLIS_KEY)) return fail(401, 'Falscher Dienstschlüssel.');
+    isAdmin = keyMatches(request.headers.get('x-polis-admin'), env.POLIS_KEY_ADMIN);
+    if (route === 'auth') return json({ ok: true });
+    const dec = (h) => { try { return clean(decodeURIComponent(request.headers.get(h) || ''), 60); } catch { return ''; } };
+    officer = { name: dec('x-polis-name'), nr: dec('x-polis-nr').slice(0, 20) };
+    if (method !== 'GET' && (!officer.name || !officer.nr)) {
+      return fail(403, 'Bitte oben Name und Dienstnummer eintragen.');
+    }
   }
+  const needAdmin = () => fail(403, discordConfigured(env) ? 'Dafür brauchst du die Admin-Rolle auf dem Discord-Server.' : 'Dafür ist das Admin-Passwort nötig.');
+  const beamter = officer.name + ' (' + officer.nr + ')';
   const logIt = (aktion, personNum, details) => db.prepare(
     'INSERT INTO log (ts, beamter_name, beamter_nr, aktion, person_num, details) VALUES (?, ?, ?, ?, ?, ?)'
   ).bind(Date.now(), officer.name, officer.nr, aktion, personNum ?? null, clean(details, 300) || null);

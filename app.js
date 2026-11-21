@@ -61,7 +61,10 @@
   if (!prefs.officer) prefs.officer = (legacy && legacy.officer) || { name: '', nr: '' };
   delete prefs.shift; delete prefs.shifts;
   function savePrefs() { lsSet(PREFS_KEY, prefs); }
+  var authMode = 'key'; // 'key' | 'discord'
+  var me = null;        // angemeldetes Discord-Mitglied
   function officerLabel() {
+    if (authMode === 'discord') return me ? me.name + ' (@' + me.username + ')' : 'Unbekannt';
     var o = prefs.officer || {};
     if (o.name && o.nr) return o.name + ' (' + o.nr + ')';
     return o.name || o.nr || 'Unbekannt';
@@ -217,10 +220,13 @@
     var headers = { 'x-polis-key': encodeURIComponent(key), 'x-polis-name': encodeURIComponent(o.name || ''), 'x-polis-nr': encodeURIComponent(o.nr || '') };
     if (adminKey) headers['x-polis-admin'] = encodeURIComponent(adminKey);
     if (opts.body) headers['content-type'] = 'application/json';
-    return fetch('/api/' + path, { method: opts.method || 'GET', headers: headers, body: opts.body ? JSON.stringify(opts.body) : undefined })
+    headers['x-polis'] = '1';
+    if (authMode === 'discord') headers = { 'x-polis': '1', 'content-type': headers['content-type'] || 'application/json' };
+    return fetch('/api/' + path, { method: opts.method || 'GET', headers: headers, credentials: 'same-origin', body: opts.body ? JSON.stringify(opts.body) : undefined })
       .then(function (r) {
         return r.json().catch(function () { return {}; }).then(function (d) {
-          if (r.status === 401 && path !== 'admin') { showGate('Dienstschlüssel ungültig. Bitte neu anmelden.'); }
+          if (authMode === 'discord' && (r.status === 401 || (r.status === 403 && d.login))) { me = null; showDiscordGate(d.error); }
+          else if (r.status === 401 && path !== 'admin') { showGate('Dienstschlüssel ungültig. Bitte neu anmelden.'); }
           if (!r.ok) { var err = new Error(d.error || ('Fehler ' + r.status)); err.status = r.status; throw err; }
           return d;
         });
@@ -268,7 +274,10 @@
   var ui = { q: '', sq: '', selId: null, msg: '', busy: false, error: '', createError: '', loading: true, tab: 'personen', hbMsg: '' };
   var hbOpenList = [];   // alle offenen Haftbefehle
   var logList = null;    // Protokoll (null = noch nicht geladen)
-  function officerOk() { var o = prefs.officer || {}; return !!(o.name && o.nr); }
+  function officerOk() {
+    if (authMode === 'discord') return !!me;
+    var o = prefs.officer || {}; return !!(o.name && o.nr);
+  }
   function loadLog() {
     return store.log().then(function (l) { logList = l; if (ui.tab === 'log') renderResults(); })
       .catch(function (e) { ui.error = e.message; if (ui.tab === 'log') renderResults(); });
@@ -583,7 +592,7 @@
     }).catch(function (e) { setAdminKey(prev); $('adminError').textContent = e.message; });
   });
   function checkAdmin() {
-    if (!adminKey || mode !== 'server') return;
+    if (authMode === 'discord' || !adminKey || mode !== 'server') return;
     api('admin').then(function () { isAdmin = true; renderRecord(); })
       .catch(function () { isAdmin = false; setAdminKey(''); renderRecord(); });
   }
@@ -618,6 +627,40 @@
       if (ui.tab === 'log') loadLog();
     }).catch(function (e) { $('admMsg').textContent = e.message; });
   });
+  var LOGIN_REASONS = {
+    'keine-rolle': 'Dir fehlt die Polizei-Rolle auf dem Discord-Server.',
+    'abgebrochen': 'Anmeldung abgebrochen.',
+    'ungueltig': 'Anmeldung abgelaufen. Bitte noch einmal versuchen.',
+    'fehler': 'Anmeldung bei Discord fehlgeschlagen. Bitte noch einmal versuchen.'
+  };
+  function showDiscordGate(msg) {
+    $('discordGate').hidden = false;
+    $('discordError').textContent = msg || '';
+  }
+  function renderMe() {
+    var d = authMode === 'discord';
+    $('meBox').hidden = !(d && me);
+    document.querySelectorAll('.officer-field').forEach(function (f) { f.hidden = d; });
+    if (d && me) {
+      $('meName').textContent = me.name;
+      $('meAvatar').hidden = !me.avatar;
+      if (me.avatar) $('meAvatar').src = me.avatar;
+    }
+  }
+  function enterDiscord() {
+    authMode = 'discord'; mode = 'server';
+    var reason = new URLSearchParams(location.search).get('login');
+    if (reason) history.replaceState(null, '', location.pathname);
+    renderMe();
+    api('me').then(function (m) {
+      me = m; isAdmin = !!m.admin;
+      $('discordGate').hidden = true;
+      renderMe(); renderOfficer();
+      enterServer();
+    }).catch(function (e) {
+      showDiscordGate(reason ? (LOGIN_REASONS[reason] || '') : (e.status === 401 ? '' : e.message));
+    });
+  }
   function showGate(msg) {
     $('gate').hidden = false;
     $('gateError').textContent = msg || '';
@@ -648,6 +691,10 @@
     }).catch(function (e) { $('gateError').textContent = e.message; });
   });
   $('logoutBtn').addEventListener('click', function () {
+    if (authMode === 'discord') {
+      api('auth/logout', { method: 'POST' }).catch(function () {}).then(function () { me = null; isAdmin = false; renderMe(); showDiscordGate(''); });
+      return;
+    }
     key = ''; lsSet(KEY_STORE, '');
     showGate('');
   });
@@ -779,7 +826,7 @@
     var o = prefs.officer || {};
     var ok = officerOk();
     document.body.classList.toggle('no-officer', !ok);
-    $('officerWarn').hidden = ok;
+    $('officerWarn').hidden = ok || authMode === 'discord';
     officerName.classList.toggle('missing', !o.name);
     officerNr.classList.toggle('missing', !o.nr);
   }
@@ -789,6 +836,7 @@
     ev.preventDefault(); ev.stopImmediatePropagation();
     var warn = $('officerWarn');
     warn.hidden = false; warn.classList.remove('shake'); void warn.offsetWidth; warn.classList.add('shake');
+    if (authMode === 'discord') { showDiscordGate(''); return true; }
     ((prefs.officer || {}).name ? officerNr : officerName).focus();
     return true;
   }
@@ -814,9 +862,10 @@
 
   // Andere Beamte sehen Änderungen nach spätestens 20 Sekunden
   setInterval(function () {
-    if (mode === 'server' && !document.hidden && $('gate').hidden) {
+    if (mode === 'server' && !document.hidden && $('gate').hidden && $('discordGate').hidden) {
       refreshPeople(); if (ui.selId) { loadAkte(ui.selId, true); loadHb(ui.selId); }
       if (ui.tab === 'log') loadLog();
+      if (authMode === 'discord') api('me').then(function (m) { me = m; isAdmin = !!m.admin; renderMe(); renderRecord(); }).catch(function () {});
     }
   }, 20000);
 
@@ -827,7 +876,9 @@
     .then(function (r) { return r.ok ? r.json() : null; })
     .catch(function () { return null; })
     .then(function (h) {
-      if (h && h.ok && h.db && h.keySet) {
+      if (h && h.ok && h.db && h.auth === 'discord') {
+        enterDiscord();
+      } else if (h && h.ok && h.db && h.keySet) {
         adminAvailable = !!h.adminSet;
         renderMode();
         mode = 'server';
