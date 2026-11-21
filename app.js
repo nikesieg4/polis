@@ -1374,16 +1374,21 @@
   function renderRechte() {
     if (!rData) return;
     var rollen = rData.rollen.filter(function (r) { return !r.admin; });
-    $('rTable').innerHTML = '<thead><tr><th class="sticky">Recht</th>' + rollen.map(function (r) {
-      return '<th class="role-col"><span>' + esc(r.name) + '</span></th>';
-    }).join('') + '</tr></thead><tbody>' + rData.perms.map(function (pm) {
-      var set = rData.matrix[pm.key] || [];
-      return '<tr><th class="sticky perm-cell" scope="row"><strong>' + esc(pm.label) + '</strong><span>' + esc(pm.desc || '') + '</span></th>' +
-        rollen.map(function (r) {
-          return '<td class="check-cell"><input type="checkbox" aria-label="' + esc(pm.label + ' für ' + r.name) + '" data-perm="' + pm.key + '" data-role="' + esc(r.id) + '"' + (set.indexOf(r.id) !== -1 ? ' checked' : '') + '></td>';
+    // Rechte oben als Spalten, Rollen links als Zeilen
+    $('rTable').innerHTML = '<thead><tr><th class="sticky corner" scope="col">Rolle</th>' + rData.perms.map(function (pm) {
+      return '<th class="perm-col" scope="col" title="' + esc(pm.desc || '') + '"><span>' + esc(pm.label) + '</span></th>';
+    }).join('') + '</tr></thead><tbody>' + rollen.map(function (r) {
+      return '<tr><th class="sticky role-row" scope="row">' + esc(r.name) + '</th>' +
+        rData.perms.map(function (pm) {
+          var on = (rData.matrix[pm.key] || []).indexOf(r.id) !== -1;
+          return '<td class="check-cell"><input type="checkbox" aria-label="' + esc(pm.label + ' für ' + r.name) + '" data-perm="' + pm.key + '" data-role="' + esc(r.id) + '"' + (on ? ' checked' : '') + '></td>';
         }).join('') + '</tr>';
     }).join('') + '</tbody>';
-    $('rMsg').textContent = rData.gespeichert ? '' : 'Noch nicht gespeichert: Angezeigt werden die Voreinstellungen nach Rollennamen.';
+    $('rLegend').innerHTML = rData.perms.map(function (pm) {
+      return '<div><dt>' + esc(pm.label) + '</dt><dd>' + esc(pm.desc || '') + '</dd></div>';
+    }).join('');
+    $('rMsg').className = rData.gespeichert ? 'saved' : 'muted small';
+    $('rMsg').textContent = rData.gespeichert ? '' : 'Noch nicht gespeichert: Angezeigt werden die Voreinstellungen.';
   }
   $('rSave').addEventListener('click', function () {
     var matrix = {};
@@ -1393,7 +1398,7 @@
     });
     $('rSave').disabled = true;
     api('rechte', { method: 'PUT', body: { matrix: matrix } }).then(function () {
-      $('rSave').disabled = false; return loadRechte().then(function () { $('rMsg').textContent = 'Gespeichert. Gilt für alle nach spätestens 5 Minuten oder neuem Laden.'; });
+      $('rSave').disabled = false; return loadRechte().then(function () { $('rMsg').className = 'saved'; $('rMsg').textContent = 'Gespeichert. Gilt für alle nach spätestens 5 Minuten oder neuem Laden.'; });
     }).then(loadPerms).catch(function (e) { $('rSave').disabled = false; $('rMsg').textContent = e.message; });
   });
 
