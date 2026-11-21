@@ -8,7 +8,7 @@
  * Die Tabellen werden beim ersten Aufruf automatisch angelegt.
  */
 
-import { discordConfigured, handleAuth, requireMember, rankLimits, MEMBER_SCHEMA, MEMBER_MIGRATIONS } from '../../lib/discord.js';
+import { discordConfigured, discordMissing, handleAuth, requireMember, rankLimits, MEMBER_SCHEMA, MEMBER_MIGRATIONS } from '../../lib/discord.js';
 
 const STATUSES = ['Sauber', 'Bewährung', 'Fahndung'];
 
@@ -182,7 +182,8 @@ export async function onRequest(context) {
     const discord = discordConfigured(env);
     return json({ ok: true, db: !!env.DB, auth: discord ? 'discord' : 'key', keySet: discord || !!env.POLIS_KEY,
       // Testphase: solange POLIS_KEY gesetzt ist, geht auch die Anmeldung ohne Discord
-      keyLogin: discord && !!env.POLIS_KEY, adminSet: !!env.POLIS_KEY_ADMIN });
+      keyLogin: discord && !!env.POLIS_KEY, adminSet: !!env.POLIS_KEY_ADMIN,
+      discordMissing: discordMissing(env) });
   }
 
   // --- Öffentlich: Avatarbild (nur Weiterleitung auf Roblox-CDN) ---
