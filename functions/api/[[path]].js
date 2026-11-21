@@ -471,9 +471,24 @@ export async function onRequest(context) {
       if (!Number.isInteger(eid)) return fail(404, 'Eintrag nicht gefunden.');
       const row = await db.prepare('SELECT * FROM akte WHERE id = ? AND person_num = ?').bind(eid, num).first();
       if (!row) return fail(404, 'Eintrag nicht gefunden.');
-      // PATCH { erledigt: bool }
+      // PATCH { erledigt: bool }  oder  { geld, haft } (Strafe anpassen)
       if (method === 'PATCH') {
         const b = await readBody(request);
+        if (typeof b.erledigt !== 'boolean' && (b.geld != null || b.haft != null)) {
+          if (row.erledigt && !isAdmin) return fail(409, 'Erledigte Strafen kann nur ein Admin anpassen.');
+          const para = Object.keys(KATALOG).find((k) => row.delikt.indexOf(k + ' ') === 0);
+          if (!para) return fail(400, 'Für diesen Eintrag gibt es keinen Strafrahmen.');
+          const k = KATALOG[para];
+          const geld = clampTo(b.geld ?? row.geld, k.geld);
+          const haft = clampTo(b.haft ?? row.haft, k.haft);
+          if (geld === row.geld && haft === row.haft) return json({ ok: true, geld, haft, unchanged: true });
+          await db.batch([
+            db.prepare('UPDATE akte SET geld = ?, haft = ? WHERE id = ?').bind(geld, haft, eid),
+            logIt('Strafe angepasst', num, row.delikt + ': ' + Number(row.geld).toLocaleString('de-DE') + ' € zu ' +
+              geld.toLocaleString('de-DE') + ' €, ' + row.haft + ' zu ' + haft + ' Min.')
+          ]);
+          return json({ ok: true, geld, haft });
+        }
         if (typeof b.erledigt !== 'boolean') return fail(400, 'Feld „erledigt“ fehlt.');
         await db.prepare('UPDATE akte SET erledigt = ? WHERE id = ?').bind(b.erledigt ? 1 : 0, eid).run();
         await logIt(b.erledigt ? 'Strafe erledigt' : 'Strafe wieder ausstehend', num, row.delikt).run();

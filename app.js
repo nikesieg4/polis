@@ -22,6 +22,11 @@
     { id: 'p10', group: 'Betäubungsmittel & Waffen', para: '§ 10', name: 'Verstoß gegen das Waffengesetz', geld: [6000, 15000], haft: [20, 40] }
   ];
   var STATUSES = ['Sauber', 'Bewährung', 'Fahndung'];
+  // Paragraph zu einem Registereintrag („§ 8 Laden- & Bankraub“ -> Katalogeintrag)
+  function catFor(delikt) {
+    return KATALOG.find(function (c) { return String(delikt || '').indexOf(c.para + ' ') === 0; }) || null;
+  }
+  function clampTo(v, r) { v = Math.round(Number(v)); if (!isFinite(v)) v = r[0]; return Math.min(r[1], Math.max(r[0], v)); }
   var TEAMTAG = '<@&1476650119700156618>'; // Rolle @Präsidium-Team
 
   // ---------- Helfer ----------
@@ -163,6 +168,17 @@
       saveLocal();
       return Promise.resolve();
     },
+    adjust: function (id, eid, geld, haft) {
+      var e = localEntry(id, eid), c = catFor(e && e.delikt);
+      if (e && c) {
+        var g = clampTo(geld, c.geld), h = clampTo(haft, c.haft);
+        if (g !== e.geld || h !== e.haft) {
+          llog('Strafe angepasst', id, e.delikt + ': ' + euro(e.geld) + ' zu ' + euro(g) + ', ' + e.haft + ' zu ' + h + ' Min.');
+          e.geld = g; e.haft = h; saveLocal();
+        }
+      }
+      return Promise.resolve();
+    },
     setDone: function (id, eid, done) {
       var e = localEntry(id, eid); if (e) { e.erledigt = done ? 1 : 0; llog(done ? 'Strafe erledigt' : 'Strafe wieder ausstehend', id, e.delikt); saveLocal(); }
       return Promise.resolve();
@@ -245,6 +261,9 @@
     addEntries: function (id, entries) {
       return api('people/' + encodeURIComponent(id) + '/akte', { method: 'POST', body: { entries: entries, beamter: officerLabel(), datum: today() } });
     },
+    adjust: function (id, eid, geld, haft) {
+      return api('people/' + encodeURIComponent(id) + '/akte/' + eid, { method: 'PATCH', body: { geld: geld, haft: haft } });
+    },
     setDone: function (id, eid, done) {
       return api('people/' + encodeURIComponent(id) + '/akte/' + eid, { method: 'PATCH', body: { erledigt: done } });
     },
@@ -272,7 +291,7 @@
   var store = LocalStore;
   var people = [];
   var akten = {};          // id -> Array (geladen) | undefined
-  var ui = { q: '', sq: '', selId: null, msg: '', busy: false, error: '', createError: '', loading: true, tab: 'personen', hbMsg: '' };
+  var ui = { edit: null, q: '', sq: '', selId: null, msg: '', busy: false, error: '', createError: '', loading: true, tab: 'personen', hbMsg: '' };
   var hbOpenList = [];   // alle offenen Haftbefehle
   var logList = null;    // Protokoll (null = noch nicht geladen)
   function officerOk() {
@@ -462,13 +481,14 @@
         return '<div class="entry' + (e.erledigt ? ' done' : ' open') + '"><div class="entry-top"><strong>' + esc(e.delikt) + '</strong><span>' + esc(e.datum) + '</span></div>' +
           '<span class="strafe">' + esc(strafeText(e)) + '</span>' +
           '<div class="entry-foot"><span class="by">Beamter ' + esc(e.beamter || 'Unbekannt') + '</span>' +
-          (e.erledigt
+          (!e.erledigt && ui.edit && ui.edit.eid === e.id ? '' : e.erledigt
             ? '<span class="entry-actions"><span class="tag-done">Erledigt</span>' +
               (isAdmin ? '<button type="button" class="mini mini-danger" data-action="remove" data-done="1" data-eid="' + e.id + '">Löschen</button>' : '') + '</span>'
             : '<span class="entry-actions"><span class="tag-open">Ausstehend</span>' +
+              (catFor(e.delikt) ? '<button type="button" class="mini" data-action="adjust" data-eid="' + e.id + '">Anpassen</button>' : '') +
               '<button type="button" class="mini" data-action="done" data-eid="' + e.id + '">Erledigt</button>' +
               '<button type="button" class="mini mini-danger" data-action="remove" data-eid="' + e.id + '">Entfernen</button></span>') +
-          '</div></div>';
+          '</div>' + adjustForm(e) + '</div>';
       }).join('') : '<span class="empty-note">Keine Einträge.</span>') +
       '</div></section>';
     renderStrafen();
@@ -538,6 +558,23 @@
   function closeHbForm() {
     $('hbForm').hidden = true; $('hbNewBtn').hidden = !canHb(); $('hbFormError').textContent = '';
     ['hbKz', 'hbModell', 'hbGrund', 'hbBeweise'].forEach(function (id) { $(id).value = ''; });
+  }
+
+  function adjustForm(e) {
+    if (!ui.edit || ui.edit.eid !== e.id || e.erledigt) return '';
+    var c = catFor(e.delikt);
+    if (!c) return '';
+    return '<div class="adjust">' +
+      '<div class="adjust-grid">' +
+        '<label>Geldstrafe (€)<input id="adjGeld" type="number" inputmode="numeric" min="' + c.geld[0] + '" max="' + c.geld[1] + '" step="500" value="' + esc(ui.edit.geld) + '">' +
+          '<span>' + euro(c.geld[0]) + ' bis ' + euro(c.geld[1]) + '</span></label>' +
+        '<label>Haft (Min.)<input id="adjHaft" type="number" inputmode="numeric" min="' + c.haft[0] + '" max="' + c.haft[1] + '" step="1" value="' + esc(ui.edit.haft) + '">' +
+          '<span>' + c.haft[0] + ' bis ' + c.haft[1] + ' Min.</span></label>' +
+      '</div>' +
+      '<div class="entry-actions">' +
+        '<button type="button" class="mini mini-primary" data-action="adj-save" data-eid="' + e.id + '"' + (ui.busy ? ' disabled' : '') + '>Speichern</button>' +
+        '<button type="button" class="mini" data-action="adj-cancel">Abbrechen</button>' +
+      '</div></div>';
   }
 
   function renderStrafen() {
@@ -734,6 +771,7 @@
 
     if (a === 'select') {
       if (ui.selId !== el.dataset.id) closeHbForm();
+      ui.edit = null;
       ui.selId = el.dataset.id; ui.msg = ''; ui.error = ''; ui.hbMsg = '';
       if (!findPerson(ui.selId)) { refreshPeople(); }
       renderResults(); renderRecord(); loadAkte(ui.selId, mode === 'server'); loadHb(ui.selId);
@@ -760,6 +798,23 @@
     } else if (a === 'all-done') {
       var p2 = findPerson(ui.selId);
       if (p2 && !ui.busy) run(p2, store.allDone(p2.id), '');
+    } else if (a === 'adjust') {
+      var pa = findPerson(ui.selId);
+      var ea = pa && (akten[pa.id] || []).find(function (x) { return x.id === Number(el.dataset.eid); });
+      if (!ea) return;
+      ui.edit = { eid: ea.id, geld: ea.geld, haft: ea.haft };
+      renderRecord();
+      var f = $('adjGeld'); if (f) f.focus();
+    } else if (a === 'adj-cancel') {
+      ui.edit = null; renderRecord();
+    } else if (a === 'adj-save') {
+      var ps = findPerson(ui.selId);
+      var es = ps && (akten[ps.id] || []).find(function (x) { return x.id === Number(el.dataset.eid); });
+      var cs = es && catFor(es.delikt);
+      if (!es || !cs || ui.busy) return;
+      var g = clampTo($('adjGeld').value, cs.geld), h = clampTo($('adjHaft').value, cs.haft);
+      ui.edit = null;
+      run(ps, store.adjust(ps.id, es.id, g, h), 'Strafe angepasst: ' + euro(g) + ', ' + h + ' Min. Haft.');
     } else if (a === 'done') {
       var p3 = findPerson(ui.selId);
       if (p3 && !ui.busy) run(p3, store.setDone(p3.id, Number(el.dataset.eid), true), '');
@@ -857,7 +912,18 @@
     officerName.classList.toggle('missing', !o.name);
     officerNr.classList.toggle('missing', !o.nr);
   }
-  var WRITE_ACTIONS = ['create', 'give', 'all-done', 'done', 'remove', 'hb-set', 'hb-delete'];
+  var WRITE_ACTIONS = ['create', 'give', 'all-done', 'done', 'remove', 'hb-set', 'hb-delete', 'adjust', 'adj-save'];
+  // Eingaben beim Anpassen merken, damit ein Neuzeichnen sie nicht verliert
+  document.addEventListener('input', function (ev) {
+    if (!ui.edit) return;
+    if (ev.target.id === 'adjGeld') ui.edit.geld = ev.target.value;
+    if (ev.target.id === 'adjHaft') ui.edit.haft = ev.target.value;
+  });
+  document.addEventListener('keydown', function (ev) {
+    if (ui.edit && ev.key === 'Enter' && (ev.target.id === 'adjGeld' || ev.target.id === 'adjHaft')) {
+      var b = document.querySelector('[data-action="adj-save"]'); if (b) b.click();
+    } else if (ui.edit && ev.key === 'Escape') { ui.edit = null; renderRecord(); }
+  });
   function blockIfNoOfficer(ev) {
     if (officerOk()) return false;
     ev.preventDefault(); ev.stopImmediatePropagation();
@@ -890,7 +956,7 @@
   // Andere Beamte sehen Änderungen nach spätestens 20 Sekunden
   setInterval(function () {
     if (mode === 'server' && !document.hidden && $('gate').hidden && $('discordGate').hidden) {
-      refreshPeople(); if (ui.selId) { loadAkte(ui.selId, true); loadHb(ui.selId); }
+      if (!ui.edit) { refreshPeople(); if (ui.selId) { loadAkte(ui.selId, true); loadHb(ui.selId); } }
       if (ui.tab === 'log') loadLog();
       if (authMode === 'discord') api('me').then(function (m) { me = m; isAdmin = !!m.admin; renderMe(); renderRecord(); }).catch(function () {});
     }
