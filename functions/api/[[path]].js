@@ -4,6 +4,7 @@
  * Benötigt in den Cloudflare-Pages-Einstellungen:
  *   - D1-Binding mit dem Variablennamen  DB
  *   - Umgebungsvariable (verschlüsselt)  POLIS_KEY  = Dienstschlüssel für alle Beamten
+ *   - optional (verschlüsselt)           POLIS_KEY_ADMIN = Admin-Passwort (Strafen löschen, Personen bearbeiten/löschen)
  * Die Tabellen werden beim ersten Aufruf automatisch angelegt.
  */
 
@@ -163,7 +164,7 @@ export async function onRequest(context) {
 
   // --- Öffentlich: Status ---
   if (route === 'health') {
-    return json({ ok: true, db: !!env.DB, keySet: !!env.POLIS_KEY });
+    return json({ ok: true, db: !!env.DB, keySet: !!env.POLIS_KEY, adminSet: !!env.POLIS_KEY_ADMIN });
   }
 
   // --- Öffentlich: Avatarbild (nur Weiterleitung auf Roblox-CDN) ---
@@ -188,6 +189,8 @@ export async function onRequest(context) {
 
   const db = env.DB;
   await ensureSchema(db);
+  const isAdmin = !!env.POLIS_KEY_ADMIN && safeEqual(request.headers.get('x-polis-admin') || '', env.POLIS_KEY_ADMIN);
+  const needAdmin = () => fail(403, 'Dafür ist das Admin-Passwort nötig.');
 
   // GET /api/auth – Schlüssel prüfen
   if (route === 'auth') return json({ ok: true });
@@ -202,6 +205,12 @@ export async function onRequest(context) {
   const logIt = (aktion, personNum, details) => db.prepare(
     'INSERT INTO log (ts, beamter_name, beamter_nr, aktion, person_num, details) VALUES (?, ?, ?, ?, ?, ?)'
   ).bind(Date.now(), officer.name, officer.nr, aktion, personNum ?? null, clean(details, 300) || null);
+
+  // GET /api/admin – Admin-Passwort prüfen
+  if (route === 'admin' && method === 'GET') {
+    if (!env.POLIS_KEY_ADMIN) return fail(503, 'Admin-Passwort ist auf dem Server nicht eingerichtet (POLIS_KEY_ADMIN).');
+    return isAdmin ? json({ ok: true }) : fail(401, 'Falsches Admin-Passwort.');
+  }
 
   // GET /api/log?limit=200&person=P-1001
   if (route === 'log' && method === 'GET') {
@@ -238,6 +247,19 @@ export async function onRequest(context) {
       : db.prepare(HB_SELECT + ' ORDER BY h.id DESC LIMIT 200');
     const { results } = await q.all();
     return json({ haftbefehle: results.map(hbOut) });
+  }
+
+  // DELETE /api/haftbefehle/:id  (Admin)
+  if (parts[0] === 'haftbefehle' && parts.length === 2 && method === 'DELETE') {
+    if (!isAdmin) return needAdmin();
+    const hid = Number(parts[1]);
+    const row = Number.isInteger(hid) ? await db.prepare('SELECT * FROM haftbefehle WHERE id = ?').bind(hid).first() : null;
+    if (!row) return fail(404, 'Haftbefehl nicht gefunden.');
+    await db.batch([
+      db.prepare('DELETE FROM haftbefehle WHERE id = ?').bind(hid),
+      logIt('Haftbefehl gelöscht (Admin)', row.person_num, row.grund + (row.kennzeichen ? ', ' + row.kennzeichen : ''))
+    ]);
+    return json({ ok: true });
   }
 
   // PATCH /api/haftbefehle/:id  { status: 'vollstreckt' | 'aufgehoben' | 'offen', beamter }
@@ -295,20 +317,50 @@ export async function onRequest(context) {
     const person = await db.prepare('SELECT * FROM people WHERE num = ?').bind(num).first();
     if (!person) return fail(404, 'Person nicht gefunden.');
 
-    // PATCH /api/people/:id  { status?, danger?, name? }
+    // PATCH /api/people/:id  { status?, danger? }  –  name und roblox nur als Admin
     if (parts.length === 2 && method === 'PATCH') {
       const b = await readBody(request);
       const status = STATUSES.includes(b.status) ? b.status : person.status;
       const danger = typeof b.danger === 'boolean' ? (b.danger ? 1 : 0) : person.danger;
-      const name = b.name != null && clean(b.name, 60) ? clean(b.name, 60) : person.name;
-      const row = await db.prepare('UPDATE people SET status = ?, danger = ?, name = ? WHERE num = ? RETURNING *')
-        .bind(status, danger, name, num).first();
+      let name = person.name, roblox = person.roblox, robloxId = person.roblox_id;
+      if (b.name != null || b.roblox != null) {
+        if (!isAdmin) return needAdmin();
+        if (b.name != null && clean(b.name, 60)) name = clean(b.name, 60);
+        if (b.roblox != null) {
+          const handle = clean(b.roblox, 30).replace(/^@+/, '');
+          if (!HANDLE_RE.test(handle)) return fail(400, 'Ungültiger Roblox-Name.');
+          if (handle.toLowerCase() !== person.roblox.toLowerCase()) {
+            let u;
+            try { u = await robloxLookup(handle); } catch { return fail(502, 'Roblox ist gerade nicht erreichbar.'); }
+            if (!u) return fail(404, `Es gibt keinen Roblox-Account „@${handle}“.`);
+            const dupe = await db.prepare('SELECT num FROM people WHERE (roblox = ? OR roblox_id = ?) AND num != ?').bind(u.name, u.id, num).first();
+            if (dupe) return fail(409, `@${u.name} ist schon als P-${1000 + dupe.num} erfasst.`);
+            roblox = u.name; robloxId = u.id;
+          }
+        }
+      }
+      const row = await db.prepare('UPDATE people SET status = ?, danger = ?, name = ?, roblox = ?, roblox_id = ? WHERE num = ? RETURNING *')
+        .bind(status, danger, name, roblox, robloxId, num).first();
       const changes = [];
       if (status !== person.status) changes.push('Status: ' + person.status + ' zu ' + status);
       if (danger !== person.danger) changes.push(danger ? 'als gefährlich markiert' : 'nicht mehr gefährlich');
       if (name !== person.name) changes.push('Name: ' + person.name + ' zu ' + name);
-      if (changes.length) await logIt('Person geändert', num, changes.join(', ')).run();
+      if (roblox !== person.roblox) changes.push('Roblox: @' + person.roblox + ' zu @' + roblox);
+      const adminEdit = name !== person.name || roblox !== person.roblox;
+      if (changes.length) await logIt(adminEdit ? 'Person bearbeitet (Admin)' : 'Person geändert', num, changes.join(', ')).run();
       return json({ person: personOut(row) });
+    }
+
+    // DELETE /api/people/:id  (Admin) – Person mit Strafregister und Haftbefehlen löschen
+    if (parts.length === 2 && method === 'DELETE') {
+      if (!isAdmin) return needAdmin();
+      await db.batch([
+        db.prepare('DELETE FROM akte WHERE person_num = ?').bind(num),
+        db.prepare('DELETE FROM haftbefehle WHERE person_num = ?').bind(num),
+        db.prepare('DELETE FROM people WHERE num = ?').bind(num),
+        logIt('Person gelöscht (Admin)', null, person.name + ' (@' + person.roblox + ', P-' + (1000 + num) + ')')
+      ]);
+      return json({ ok: true });
     }
 
     // GET /api/people/:id/haftbefehle
@@ -358,7 +410,7 @@ export async function onRequest(context) {
       ).bind(num, delikt, geld, haft, datum, beamter, now));
       rows.forEach(([delikt, geld, haft]) => stmts.push(logIt('Strafe vergeben', num, delikt + ': ' + geld.toLocaleString('de-DE') + ' €, ' + haft + ' Min.')));
       await db.batch(stmts);
-      return json({ ok: true, added: stmts.length }, 201);
+      return json({ ok: true, added: rows.length }, 201);
     }
 
     // PATCH /api/people/:id/akte  { erledigt: true } – alle offenen Strafen erledigt
@@ -387,9 +439,9 @@ export async function onRequest(context) {
       }
       // DELETE – nur offene Einträge (z. B. Fehlklick)
       if (method === 'DELETE') {
-        if (row.erledigt) return fail(409, 'Erledigte Einträge können nicht gelöscht werden.');
+        if (row.erledigt && !isAdmin) return fail(409, 'Erledigte Einträge kann nur ein Admin löschen.');
         await db.prepare('DELETE FROM akte WHERE id = ?').bind(eid).run();
-        await logIt('Strafe entfernt', num, row.delikt + ': ' + Number(row.geld).toLocaleString('de-DE') + ' €, ' + row.haft + ' Min.').run();
+        await logIt(row.erledigt ? 'Strafe gelöscht (Admin)' : 'Strafe entfernt', num, row.delikt + ': ' + Number(row.geld).toLocaleString('de-DE') + ' €, ' + row.haft + ' Min.').run();
         return json({ ok: true });
       }
     }

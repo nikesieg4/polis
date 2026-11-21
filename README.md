@@ -12,6 +12,8 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 
 - **Protokoll**: Jede Änderung (Person angelegt/geändert, Strafe vergeben/erledigt/entfernt, Haftbefehl ausgestellt/vollstreckt/aufgehoben) wird mit Name, Dienstnummer und Uhrzeit gespeichert und ist im Tab „Protokoll“ durchsuchbar. Ohne Name und Dienstnummer oben kann man nichts eintragen; die API lehnt Änderungen ohne die Header `x-polis-name` und `x-polis-nr` ab.
 
+- **Admin** (Knopf „Admin“ oben, Passwort = Secret `POLIS_KEY_ADMIN`): RP-Name und Roblox-Namen einer Person ändern (neuer Account wird bei Roblox geprüft), auch erledigte Strafen löschen, Haftbefehle löschen, Personen mit allen Einträgen löschen. Alles landet mit „(Admin)“ im Protokoll. Das Admin-Passwort gilt nur bis der Tab geschlossen wird.
+
 ## Hosting
 Statische Seite (`index.html`, `style.css`, `app.js`) plus API in `functions/api/` (Cloudflare Pages Functions). Kein Build-Schritt.
 
@@ -22,7 +24,7 @@ Statische Seite (`index.html`, `style.css`, `app.js`) plus API in `functions/api
 1. **D1-Datenbank anlegen:** Workers & Pages → D1 → *Create database* → Name z. B. `polis-db`.
 2. **Pages-Projekt verbinden:** Workers & Pages → Create → Pages → *Connect to Git* → dieses Repo. Production branch `main`, Build command leer, Build output directory `/`.
 3. **Datenbank verbinden:** Pages-Projekt → Settings → Bindings → *Add* → D1 database. Variable name **`DB`**, Datenbank `polis-db`.
-4. **Dienstschlüssel festlegen:** Settings → Variables and Secrets → *Add* → Typ *Secret*, Name **`POLIS_KEY`**, Wert = ein langes Passwort, das nur die Polizei-Fraktion bekommt.
+4. **Dienstschlüssel festlegen** (optional zusätzlich Secret `POLIS_KEY_ADMIN` für Admins): Settings → Variables and Secrets → *Add* → Typ *Secret*, Name **`POLIS_KEY`**, Wert = ein langes Passwort, das nur die Polizei-Fraktion bekommt.
 5. **Neu ausrollen:** Deployments → letzter Deploy → *Retry deployment* (Bindings und Secrets gelten erst ab dem nächsten Deploy).
 
 Die Tabellen werden beim ersten Aufruf automatisch angelegt. Jeder Push auf `main` wird automatisch veröffentlicht.
@@ -47,6 +49,10 @@ Alle Endpunkte außer `health` und `avatar` brauchen den Header `x-polis-key`. �
 | GET | `/api/haftbefehle?status=offen` | Alle Haftbefehle (optional nach Status) |
 | PATCH | `/api/haftbefehle/:id` | `status`: `offen`, `vollstreckt`, `aufgehoben` |
 | GET | `/api/log?limit=200&person=P-1001` | Protokoll (optional nur eine Person) |
+| GET | `/api/admin` | Admin-Passwort prüfen (Header `x-polis-admin`) |
+| PATCH | `/api/people/:id` mit `name` / `roblox` | Person bearbeiten (Admin) |
+| DELETE | `/api/people/:id` | Person mit allen Einträgen löschen (Admin) |
+| DELETE | `/api/haftbefehle/:id` | Haftbefehl löschen (Admin) |
 | GET | `/api/roblox/:name` | Roblox-Account nachschlagen |
 | GET | `/api/avatar/:robloxId` | Weiterleitung auf das Roblox-Avatarbild |
 

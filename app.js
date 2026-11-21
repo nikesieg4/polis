@@ -206,15 +206,21 @@
 
   // ---------- Server (Cloudflare D1) ----------
   var key = lsGet(KEY_STORE) || '';
+  // Admin-Passwort nur für diese Browser-Sitzung (wird beim Schließen des Tabs vergessen)
+  var adminKey = '';
+  try { adminKey = sessionStorage.getItem('polis.admin') || ''; } catch (e) { /* ignorieren */ }
+  var isAdmin = false, adminAvailable = false;
+  function setAdminKey(k) { adminKey = k; try { k ? sessionStorage.setItem('polis.admin', k) : sessionStorage.removeItem('polis.admin'); } catch (e) { /* ignorieren */ } }
   function api(path, opts) {
     opts = opts || {};
     var o = prefs.officer || {};
     var headers = { 'x-polis-key': key, 'x-polis-name': encodeURIComponent(o.name || ''), 'x-polis-nr': encodeURIComponent(o.nr || '') };
+    if (adminKey) headers['x-polis-admin'] = adminKey;
     if (opts.body) headers['content-type'] = 'application/json';
     return fetch('/api/' + path, { method: opts.method || 'GET', headers: headers, body: opts.body ? JSON.stringify(opts.body) : undefined })
       .then(function (r) {
         return r.json().catch(function () { return {}; }).then(function (d) {
-          if (r.status === 401) { showGate('Dienstschlüssel ungültig. Bitte neu anmelden.'); }
+          if (r.status === 401 && path !== 'admin') { showGate('Dienstschlüssel ungültig. Bitte neu anmelden.'); }
           if (!r.ok) { var err = new Error(d.error || ('Fehler ' + r.status)); err.status = r.status; throw err; }
           return d;
         });
@@ -249,7 +255,9 @@
     },
     hbSet: function (hid, status) {
       return api('haftbefehle/' + hid, { method: 'PATCH', body: { status: status, beamter: officerLabel() } });
-    }
+    },
+    hbDelete: function (hid) { return api('haftbefehle/' + hid, { method: 'DELETE' }); },
+    deletePerson: function (id) { return api('people/' + encodeURIComponent(id), { method: 'DELETE' }); }
   };
 
   // ---------- Zustand ----------
@@ -379,7 +387,21 @@
   }
 
   // ---------- Strafregister ----------
+  function renderAdmin() {
+    var p = findPerson(ui.selId);
+    var box = $('adminBox');
+    box.hidden = !(isAdmin && p);
+    $('adminBadge').hidden = !isAdmin;
+    $('adminBtn').hidden = !(mode === 'server' && adminAvailable);
+    $('adminBtn').textContent = isAdmin ? 'Admin beenden' : 'Admin';
+    if (!p || !isAdmin) { box.dataset.pid = ''; return; }
+    if (box.dataset.pid !== p.id) {
+      box.dataset.pid = p.id;
+      $('admName').value = p.name; $('admRoblox').value = p.roblox; $('admMsg').textContent = '';
+    }
+  }
   function renderRecord() {
+    renderAdmin();
     var box = $('record'), hist = $('history');
     var p = findPerson(ui.selId);
     $('strafeBox').hidden = !p;
@@ -431,7 +453,8 @@
           '<span class="strafe">' + esc(strafeText(e)) + '</span>' +
           '<div class="entry-foot"><span class="by">Beamter ' + esc(e.beamter || 'Unbekannt') + '</span>' +
           (e.erledigt
-            ? '<span class="tag-done">Erledigt</span>'
+            ? '<span class="entry-actions"><span class="tag-done">Erledigt</span>' +
+              (isAdmin ? '<button type="button" class="mini mini-danger" data-action="remove" data-done="1" data-eid="' + e.id + '">Löschen</button>' : '') + '</span>'
             : '<span class="entry-actions"><span class="tag-open">Ausstehend</span>' +
               '<button type="button" class="mini" data-action="done" data-eid="' + e.id + '">Erledigt</button>' +
               '<button type="button" class="mini mini-danger" data-action="remove" data-eid="' + e.id + '">Entfernen</button></span>') +
@@ -477,6 +500,7 @@
               ? '<button type="button" class="mini" data-action="hb-set" data-status="vollstreckt" data-hid="' + h.id + '">Vollstreckt</button>' +
                 '<button type="button" class="mini mini-danger" data-action="hb-set" data-status="aufgehoben" data-hid="' + h.id + '">Aufheben</button>'
               : '<button type="button" class="mini" data-action="hb-set" data-status="offen" data-hid="' + h.id + '">Wieder öffnen</button>') +
+            (isAdmin ? '<button type="button" class="mini mini-danger" data-action="hb-delete" data-hid="' + h.id + '">Löschen</button>' : '') +
           '</div></div>';
       }).join('') : '<span class="empty-note">Keine Haftbefehle.</span>');
   }
@@ -538,7 +562,62 @@
     note.textContent = 'Lokaler Modus';
     $('resetBtn').hidden = mode === 'server';
     $('logoutBtn').hidden = mode !== 'server';
+    renderAdmin();
   }
+  function openAdminGate() {
+    $('adminGate').hidden = false; $('adminError').textContent = '';
+    setTimeout(function () { $('adminKey').focus(); }, 0);
+  }
+  $('adminBtn').addEventListener('click', function () {
+    if (isAdmin) { isAdmin = false; setAdminKey(''); renderRecord(); return; }
+    openAdminGate();
+  });
+  $('adminCancel').addEventListener('click', function () { $('adminGate').hidden = true; $('adminKey').value = ''; });
+  $('adminForm').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var prev = adminKey;
+    setAdminKey($('adminKey').value);
+    api('admin').then(function () {
+      isAdmin = true; $('adminGate').hidden = true; $('adminKey').value = '';
+      renderRecord();
+    }).catch(function (e) { setAdminKey(prev); $('adminError').textContent = e.message; });
+  });
+  function checkAdmin() {
+    if (!adminKey || mode !== 'server') return;
+    api('admin').then(function () { isAdmin = true; renderRecord(); })
+      .catch(function () { isAdmin = false; setAdminKey(''); renderRecord(); });
+  }
+  $('admSave').addEventListener('click', function (ev) {
+    if (blockIfNoOfficer(ev)) return;
+    var p = findPerson(ui.selId);
+    if (!p) return;
+    var patch = {};
+    var n = $('admName').value.trim(), r = $('admRoblox').value.trim().replace(/^@+/, '');
+    if (n && n !== p.name) patch.name = n;
+    if (r && r.toLowerCase() !== p.roblox.toLowerCase()) patch.roblox = r;
+    if (!Object.keys(patch).length) { $('admMsg').textContent = 'Keine Änderung.'; return; }
+    $('admMsg').textContent = 'Bitte warten';
+    store.update(p.id, patch).then(function (np) {
+      Object.assign(p, { name: np.name, roblox: np.roblox, robloxId: np.robloxId });
+      $('adminBox').dataset.pid = '';
+      renderResults(); renderRecord();
+      $('admMsg').textContent = 'Gespeichert.';
+      loadHb(p.id);
+    }).catch(function (e) { $('admMsg').textContent = e.message; });
+  });
+  $('admDelete').addEventListener('click', function (ev) {
+    if (blockIfNoOfficer(ev)) return;
+    var p = findPerson(ui.selId);
+    if (!p) return;
+    if (!confirm(p.name + ' (@' + p.roblox + ') mit allen Strafen und Haftbefehlen endgültig löschen?')) return;
+    store.deletePerson(p.id).then(function () {
+      people = people.filter(function (x) { return x.id !== p.id; });
+      delete akten[p.id]; delete hbByPerson[p.id];
+      ui.selId = people[0] ? people[0].id : null;
+      refreshPeople().then(function () { if (ui.selId) { loadAkte(ui.selId, true); loadHb(ui.selId); } });
+      if (ui.tab === 'log') loadLog();
+    }).catch(function (e) { $('admMsg').textContent = e.message; });
+  });
   function showGate(msg) {
     $('gate').hidden = false;
     $('gateError').textContent = msg || '';
@@ -549,6 +628,7 @@
     mode = 'server'; store = ServerStore; people = []; akten = {}; ui.loading = true; ui.selId = null;
     renderMode(); renderResults(); renderRecord();
     refreshPeople().then(function () { loadAkte(ui.selId); loadHb(ui.selId); });
+    checkAdmin();
   }
   function enterLocal() {
     logList = null;
@@ -625,8 +705,14 @@
         ui.hbMsg = st === 'vollstreckt' ? 'Als vollstreckt markiert. Strafe unten vergeben.' : st === 'aufgehoben' ? 'Haftbefehl aufgehoben.' : 'Haftbefehl wieder offen.';
         return afterHbChange(p6);
       }).catch(function (e) { ui.hbMsg = e.message; renderHb(); });
+    } else if (a === 'hb-delete') {
+      var p7 = findPerson(ui.selId);
+      if (!p7 || !confirm('Haftbefehl endgültig löschen?')) return;
+      store.hbDelete(Number(el.dataset.hid)).then(function () { ui.hbMsg = 'Haftbefehl gelöscht.'; return afterHbChange(p7); })
+        .catch(function (e) { ui.hbMsg = e.message; renderHb(); });
     } else if (a === 'remove') {
       var p4 = findPerson(ui.selId);
+      if (el.dataset.done && !confirm('Erledigte Strafe endgültig löschen?')) return;
       if (p4 && !ui.busy) run(p4, store.remove(p4.id, Number(el.dataset.eid)), 'Eintrag entfernt.');
     }
   });
@@ -697,7 +783,7 @@
     officerName.classList.toggle('missing', !o.name);
     officerNr.classList.toggle('missing', !o.nr);
   }
-  var WRITE_ACTIONS = ['create', 'give', 'all-done', 'done', 'remove', 'hb-set'];
+  var WRITE_ACTIONS = ['create', 'give', 'all-done', 'done', 'remove', 'hb-set', 'hb-delete'];
   function blockIfNoOfficer(ev) {
     if (officerOk()) return false;
     ev.preventDefault(); ev.stopImmediatePropagation();
@@ -742,6 +828,7 @@
     .catch(function () { return null; })
     .then(function (h) {
       if (h && h.ok && h.db && h.keySet) {
+        adminAvailable = !!h.adminSet;
         renderMode();
         mode = 'server';
         renderMode();

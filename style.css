@@ -274,3 +274,10 @@ body.no-officer #hbNewBtn { opacity: 0.45; cursor: not-allowed; }
 .log-by { font-size: 12px; color: var(--muted); }
 .log-person { background: none; border: 0; padding: 0; color: #8FB4FF; font: inherit; cursor: pointer; text-align: left; }
 .log-person:hover { text-decoration: underline; }
+
+/* Admin */
+.admin-badge { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; padding: 2px 6px; border-radius: 4px; background: #2D1F4A; color: #C9B5FF; vertical-align: middle; }
+.admin-card { border-color: #4A3A7A; }
+.btn-danger { color: #FFB3B3; border-color: #5A2228; }
+.btn-danger:hover { background: #2A1215; }
+#adminForm .btn-ghost { width: 100%; }
