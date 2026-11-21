@@ -10,7 +10,8 @@
 
 import { discordConfigured, discordMissing, handleAuth, requireMember, noAccess, guildRoleList, MEMBER_SCHEMA, MEMBER_MIGRATIONS } from '../../lib/discord.js';
 import { PERMS, PERM_KEYS, RECHTE_SCHEMA, loadMatrix, permsFor, saveMatrix } from '../../lib/rechte.js';
-import { SCHICHT_SCHEMA, handleSchicht } from '../../lib/schicht.js';
+import { SCHICHT_SCHEMA, SCHICHT_MIGRATIONS, handleSchicht } from '../../lib/schicht.js';
+import { einheitFuer } from '../../lib/rollen.js';
 import { REGISTER_SCHEMA, handleRegister } from '../../lib/register.js';
 
 const STATUSES = ['Sauber', 'Bewährung', 'Fahndung'];
@@ -153,6 +154,7 @@ async function ensureSchema(db) {
   }
   // Protokolleinträge, die nur sehen darf, wer die Kripo-Markierung sehen darf
   try { await db.prepare('ALTER TABLE log ADD COLUMN geheim INTEGER NOT NULL DEFAULT 0').run(); } catch { /* existiert schon */ }
+  for (const m of SCHICHT_MIGRATIONS) { try { await db.prepare(m).run(); } catch { /* existiert schon */ } }
   for (const m of MEMBER_MIGRATIONS) { try { await db.prepare(m).run(); } catch { /* existiert schon */ } }
   schemaReady = true;
 }
@@ -270,7 +272,7 @@ export async function onRequest(context) {
   const db = env.DB;
   await ensureSchema(db);
 
-  let officer, uid, perms, roleList = [];
+  let officer, uid, perms, roleList = [], einheit = 'Polizei';
   // Ohne Discord anmelden (Testphase): nur wenn POLIS_KEY noch existiert und der Client ihn mitschickt
   const viaKey = !!env.POLIS_KEY && !!request.headers.get('x-polis-key');
   if (discordConfigured(env) && !viaKey) {
@@ -291,6 +293,7 @@ export async function onRequest(context) {
     if (method !== 'GET' && request.headers.get('x-polis') !== '1') return fail(403, 'Ungültige Anfrage.');
     officer = { name: auth.member.name || auth.member.username, nr: '@' + auth.member.username };
     uid = auth.member.uid;
+    einheit = einheitFuer(auth.member.roles, roleList);
     if (route === 'me') {
       return json({ name: officer.name, username: auth.member.username, avatar: auth.member.avatar,
         admin: perms.has('admin'), perms: [...perms], rang: auth.member.rang || 0 });
@@ -379,7 +382,7 @@ export async function onRequest(context) {
   }
 
   // ---------- Schichtzeit, Polizei-Register, Rechte ----------
-  const ctx = { request, method, parts, db, can, uid, officer, beamter, json, fail, readBody, logIt, clean, url: new URL(request.url) };
+  const ctx = { request, method, parts, db, can, uid, officer, beamter, json, fail, readBody, logIt, clean, einheit, url: new URL(request.url) };
   if (parts[0] === 'schicht') {
     const r = await handleSchicht(ctx);
     if (r) return r;

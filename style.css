@@ -415,3 +415,15 @@ body.no-officer #hbNewBtn { opacity: 0.45; cursor: not-allowed; }
 .alert-kripo { display: flex; flex-direction: column; gap: 2px; padding-top: 10px; padding-bottom: 10px; }
 .alert-title { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; }
 .alert-sub { font-size: 14px; font-weight: 500; letter-spacing: 0; color: #EDE5FF; }
+
+/* Im Dienst */
+.dienst-list { display: flex; flex-direction: column; gap: 6px; }
+.dienst-row {
+  display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 6px 10px; border-radius: 6px;
+  background: var(--inset); border: 1px solid var(--line-soft);
+}
+.dienst-row.ich { border-color: var(--accent); }
+.einheit { min-width: 64px; text-align: center; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; padding: 4px 6px; border-radius: 4px; }
+.einheit-polizei { background: #16264A; color: #A9C4FF; }
+.einheit-sek { background: #1F2A1A; color: #B9E08A; border: 1px solid #3E5A2A; }
+.dienst-zeit { font-size: 13px; color: var(--text-2); }

@@ -1289,7 +1289,7 @@
   function renderPermUi() {
     var server = mode === 'server';
     var show = {
-      schicht: server && (has('schicht') || has('schicht_alle')),
+      schicht: server, // „Im Dienst“ sieht jeder; die eigene Uhr nur mit Recht „schicht“
       beamte: server && has('register_sehen'),
       rechte: server && authMode === 'discord' && has('rechte')
     };
@@ -1316,7 +1316,7 @@
   });
 
   // ---------- Schicht ----------
-  var sData = null, mData = null, sWeek = '', sOffset = 0, sBusy = false;
+  var sData = null, mData = null, sWeek = '', sOffset = 0, sBusy = false, dData = null, dOffset = 0;
   function hm(ms) { var m = Math.floor(Math.max(0, ms) / 60000); return Math.floor(m / 60) + ':' + pad(m % 60) + ' h'; }
   function hms(ms) { var t = Math.floor(Math.max(0, ms) / 1000); return pad(Math.floor(t / 3600)) + ':' + pad(Math.floor(t / 60) % 60) + ':' + pad(t % 60); }
   function hhmmTs(ts) { var d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
@@ -1333,7 +1333,7 @@
   }
   function loadSchicht() {
     var q = sWeek ? '?woche=' + sWeek : '';
-    var jobs = [];
+    var jobs = [api('schicht/aktiv').then(function (d) { dData = d; dOffset = Date.now(); })];
     // sOffset = Zeitpunkt der Antwort (Uhr dieses Geräts); laufende Zeit zählt ab da weiter
     if (has('schicht')) jobs.push(api('schicht' + q).then(function (d) { sData = d; sOffset = Date.now(); }));
     if (has('schicht_alle')) jobs.push(api('schicht/uebersicht' + q).then(function (d) { mData = d; if (!has('schicht')) sOffset = Date.now(); }));
@@ -1342,6 +1342,7 @@
   }
   function renderSchicht() {
     var own = has('schicht');
+    $('sClock').closest('.card').hidden = !own; $('wLabel').closest('.card').hidden = !own && !has('schicht_alle');
     var d = sData;
     var a = own && d ? d.aktiv : null;
     var label = a ? (a.status === 'pause' ? 'Pause' : 'Im Dienst') : 'Außer Dienst';
@@ -1370,6 +1371,21 @@
       }).join('') : '<span class="empty-note">Keine Schichten in dieser Woche.</span>';
     } else {
       $('sWeek').innerHTML = ''; $('sList').innerHTML = '';
+    }
+    // Im Dienst (für alle)
+    if (dData) {
+      var list = dData.imDienst;
+      var nSek = list.filter(function (x) { return x.einheit === 'SEK'; }).length;
+      $('dienstCount').textContent = list.length ? list.length + ' im Dienst' + (nSek ? ' (' + (list.length - nSek) + ' Polizei, ' + nSek + ' SEK)' : '') : '';
+      $('dienstList').innerHTML = list.length ? list.map(function (x) {
+        var t = x.dauerMs + (x.status === 'aktiv' ? Date.now() - dOffset : 0);
+        return '<div class="dienst-row' + (x.ich ? ' ich' : '') + '">' +
+          '<span class="einheit einheit-' + (x.einheit === 'SEK' ? 'sek' : 'polizei') + '">' + esc(x.einheit) + '</span>' +
+          '<span class="person-main"><strong>' + esc(x.name) + (x.ich ? ' <span class="muted">(du)</span>' : '') + '</strong>' +
+          '<span>seit ' + hhmmTs(x.start) + ' Uhr</span></span>' +
+          (x.status === 'pause' ? '<span class="chip chip-amber">Pause</span>' : '<span class="chip chip-green">Im Dienst</span>') +
+          '<span class="mono dienst-zeit">' + hms(t) + '</span></div>';
+      }).join('') : '<span class="empty-note">Gerade ist niemand im Dienst.</span>';
     }
     // Management
     var mg = has('schicht_alle');

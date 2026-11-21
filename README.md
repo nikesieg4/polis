@@ -17,6 +17,7 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 
 - **Admin** (Knopf „Admin“ oben, Passwort = Secret `POLIS_KEY_ADMIN`): RP-Name und Roblox-Namen einer Person ändern (neuer Account wird bei Roblox geprüft), auch erledigte Strafen löschen, Haftbefehle löschen, Personen mit allen Einträgen löschen. Alles landet mit „(Admin)“ im Protokoll. Das Admin-Passwort gilt nur bis der Tab geschlossen wird.
 
+- **Im Dienst** (Seite „Schicht“, für alle): Liste aller, die gerade eine Schicht laufen haben, mit Status, Startzeit und laufender Zeit sowie Schild **Polizei** oder **SEK**. SEK ist, wer beim Schichtstart eine SEK-Rolle (S1–S16) hat; alle anderen, auch Kripo, erscheinen als Polizei.
 - **Schicht** (oben „Schicht“): Schicht starten, Pause, Fortsetzen, Beenden. Jeder sieht seine eigene Zeit pro Woche (Montag bis Sonntag, deutsche Zeit) und den Stand zur Wochenquote. Das Management sieht alle Beamten, kann vergessene Schichten beenden und die Wochenquote festlegen (gilt ab der gewählten Woche, bis eine neue festgelegt wird). Code: `lib/schicht.js`.
 - **Polizei-Register** (oben „Polizei-Register“): Beamte mit Dienstnummer, Rang, Status, Discord-Name, Eintritt, Ausbildungen und Notizen; bearbeiten z. B. für Ausbilder. Code: `lib/register.js`.
 
@@ -80,6 +81,7 @@ Mit Discord-Anmeldung: Sitzungs-Cookie `polis_session` (über `/api/auth/discord
 | GET | `/api/gruppen` | Alle Gruppierungen mit Mitgliederzahl |
 | GET / PUT | `/api/gruppen/:name` | Beschreibung und Mitglieder / Beschreibung ändern (ab A6) |
 | GET / POST | `/api/schicht` | Eigene Schicht und Woche (`?woche=YYYY-MM-DD`) / `{ aktion: start, pause, weiter, ende }` |
+| GET | `/api/schicht/aktiv` | Wer gerade im Dienst ist, mit Einheit (für alle) |
 | GET | `/api/schicht/uebersicht` | Alle Beamten der Woche (Management) |
 | POST | `/api/schicht/beenden/:id` | Fremde Schicht beenden (Management) |
 | PUT | `/api/schicht/quote` | `{ woche, stunden }` Wochenquote festlegen |
