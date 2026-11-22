@@ -93,6 +93,7 @@ function hbOut(r) {
     grund: r.grund,
     beweise: r.beweise || '',
     ausgestelltVon: r.ausgestellt_von || '',
+    ausgestelltDiscord: r.ausgestellt_discord || '',
     createdAt: r.created_at,
     status: r.status,
     closedAt: r.closed_at,
@@ -142,6 +143,8 @@ async function ensureSchema(db) {
   }
   // Protokolleinträge, die nur sehen darf, wer die Kripo-Markierung sehen darf
   try { await db.prepare('ALTER TABLE log ADD COLUMN geheim INTEGER NOT NULL DEFAULT 0').run(); } catch { /* existiert schon */ }
+  // Discord-ID des ausstellenden Beamten (für die Erwähnung beim Kopieren)
+  try { await db.prepare('ALTER TABLE haftbefehle ADD COLUMN ausgestellt_discord TEXT').run(); } catch { /* existiert schon */ }
   // Katalognummer der Strafe (Paragraphen kommen im Katalog mehrfach vor)
   try { await db.prepare('ALTER TABLE akte ADD COLUMN nr INTEGER').run(); } catch { /* existiert schon */ }
   for (const m of SCHICHT_MIGRATIONS) { try { await db.prepare(m).run(); } catch { /* existiert schon */ } }
@@ -620,9 +623,9 @@ export async function onRequest(context) {
       const grund = clean(b.grund, 200);
       if (!grund) return fail(400, 'Grund fehlt.');
       const ins = await db.prepare(
-        `INSERT INTO haftbefehle (person_num, kennzeichen, modell, grund, beweise, ausgestellt_von, created_at, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'offen') RETURNING id`
-      ).bind(num, clean(b.kennzeichen, 20), clean(b.modell, 60), grund, clean(b.beweise, 500), beamter, Date.now()).first();
+        `INSERT INTO haftbefehle (person_num, kennzeichen, modell, grund, beweise, ausgestellt_von, created_at, status, ausgestellt_discord)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'offen', ?) RETURNING id`
+      ).bind(num, clean(b.kennzeichen, 20), clean(b.modell, 60), grund, clean(b.beweise, 500), beamter, Date.now(), /^\d{15,22}$/.test(String(uid)) ? String(uid) : null).first();
       await logIt('Haftbefehl ausgestellt', num, grund).run();
       const full = await db.prepare(HB_SELECT + ' WHERE h.id = ?').bind(ins.id).first();
       return json({ haftbefehl: hbOut(full) }, 201);

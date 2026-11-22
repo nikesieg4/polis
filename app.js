@@ -701,7 +701,12 @@
       '🚗 Auto Modell: ' + (h.modell || '-') + '\n\n' +
       '📜 Grund: ' + (h.grund || '') + '\n\n' +
       '🚨 Beweise: ' + (h.beweise || '-') + '\n\n' +
-      '👤 Ausgeführt von: ' + (h.ausgestelltVon || '');
+      // Der ausstellende Beamte wird erwähnt (pingt), der Teamtag ist nur Text (pingt nicht)
+      '👤 Ausgeführt von: ' + (h.ausgestelltDiscord
+        ? (h.ausgestelltVon || '').replace(/\s*\(@[^)]*\)$/, '') + ' (<@' + h.ausgestelltDiscord + '>)'
+        : (h.ausgestelltVon || '')) + '\n' +
+      '⸻⸻⸻\n' +
+      '👤 Teamtag: @Präsidium-Team';
   }
   function renderHb() {
     var p = findPerson(ui.selId);
