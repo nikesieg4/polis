@@ -45,7 +45,6 @@
     return euro(c.geld) + (c.haft ? ' + Haft' : '');
   }
   function clampTo(v, r) { v = Math.round(Number(v)); if (!isFinite(v)) v = r[0]; return Math.min(r[1], Math.max(r[0], v)); }
-  var TEAMTAG = '<@&1476650119700156618>'; // Rolle @Präsidium-Team
 
   // ---------- Helfer ----------
   function $(id) { return document.getElementById(id); }
@@ -702,9 +701,7 @@
       '🚗 Auto Modell: ' + (h.modell || '-') + '\n\n' +
       '📜 Grund: ' + (h.grund || '') + '\n\n' +
       '🚨 Beweise: ' + (h.beweise || '-') + '\n\n' +
-      '👤 Ausgeführt von: ' + (h.ausgestelltVon || '') + '\n' +
-      '⸻⸻⸻\n' +
-      '👤 Teamtag: ' + TEAMTAG;
+      '👤 Ausgeführt von: ' + (h.ausgestelltVon || '');
   }
   function renderHb() {
     var p = findPerson(ui.selId);
