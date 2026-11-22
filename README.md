@@ -6,7 +6,7 @@ Interne Datenbank für die Polizei-Fraktion von **Berlin City Roleplay** auf dem
 
 ## Funktionen
 - **Personensuche** (links): Suche nach RP-Name oder Roblox-Name. Schon beim Tippen erscheinen Vorschläge mit Avatar: passende Personen aus der Datenbank und passende Roblox-Accounts (ab 3 Zeichen, über die Roblox-Suche). Ein Klick bzw. Pfeiltasten + Enter öffnet die Akte oder legt den Roblox-Account direkt als Person an.
-- **Strafregister** (rechts): Strafe suchen (z. B. „Raub“ oder „8“) und anklicken, die Person bekommt sie sofort mit der Mindeststrafe aus dem Strafgesetzbuch (§ 1 bis 10). Oben steht, was **ausstehend** ist (Geld und Haftzeit); mit „Erledigt“ wird es abgehakt. Ausstehende Strafen lassen sich mit „Anpassen“ innerhalb der Spanne des Paragraphen erhöhen (Geld und Haftzeit, wird protokolliert) oder bei einem Fehlklick entfernen.
+- **Strafregister** (rechts): Strafe aus dem Strafkatalog (`lib/katalog.js`, Straftaten Nr. 1–27, Ordnungswidrigkeiten Nr. 31–52) suchen, z. B. „Raub“, „249“ oder „StVO“, und anklicken: Die Person bekommt sie sofort. Geldstrafen sind fest; „+ Haft“ heißt, die Person wird ins Gefängnis (Notruf Hamburg) gebracht, ohne feste Dauer. Zusätze wie „Diebesgut einziehen“ stehen dabei. Oben steht, was **ausstehend** ist (Geldstrafe, ob Haft); mit „Erledigt“ wird es abgehakt. Ausstehende Strafen lassen sich bei einem Fehlklick entfernen.
 
 - **Beschreibung** pro Person: Gruppierung (z. B. Kartell), Rang in der Gruppierung und freier Text. Jeder Beamte darf sie ändern, Änderungen stehen im Protokoll. Die Personensuche findet auch Gruppierungen; ein Klick auf die Gruppierung zeigt alle Mitglieder.
 - **Gruppierungen** (Tab links): alle Gruppierungen mit Mitgliederzahl; die Seite einer Gruppierung zeigt ihre Beschreibung und alle Mitglieder mit Rang. Die Beschreibung der Gruppierung dürfen nur A6 und höher sowie Datenbank Admin ändern (`POLIS_GRUPPE_MIN_RANK`, Standard 6).
@@ -65,9 +65,10 @@ Mit Discord-Anmeldung: Sitzungs-Cookie `polis_session` (über `/api/auth/discord
 | POST | `/api/people` | Person anlegen (`roblox`, `name`), prüft den Account bei Roblox |
 | PATCH | `/api/people/:id` | `status`, `danger`, `name` ändern |
 | GET | `/api/people/:id/akte` | Strafregister lesen |
-| POST | `/api/people/:id/akte` | Strafe vergeben (`entries: [{ para: "§ 8" }]`), Beträge werden auf die Spanne des Paragraphen begrenzt |
+| GET | `/api/katalog` | Strafkatalog (öffentlich, für die Seite) |
+| POST | `/api/people/:id/akte` | Strafe vergeben (`entries: [{ nr: 8 }]`, Nummer laut Katalog); Betrag und Haft kommen aus dem Katalog |
 | PATCH | `/api/people/:id/akte` | `{ erledigt: true }`: alle ausstehenden Strafen erledigt |
-| PATCH / DELETE | `/api/people/:id/akte/:eintrag` | `{ erledigt }` erledigen, `{ geld, haft }` anpassen (auf die Spanne begrenzt) / ausstehenden Eintrag löschen |
+| PATCH / DELETE | `/api/people/:id/akte/:eintrag` | `{ erledigt }` erledigen / ausstehenden Eintrag löschen |
 | PUT | `/api/people/:id/kripo` | `{ aktiv, hinweis }` Kripo-Markierung setzen/entfernen (Recht „kripo_setzen“) |
 | GET / POST | `/api/people/:id/haftbefehle` | Haftbefehle einer Person / neuen ausstellen (`grund` Pflicht) |
 | GET | `/api/haftbefehle?status=offen` | Alle Haftbefehle (optional nach Status) |

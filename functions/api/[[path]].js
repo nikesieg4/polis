@@ -12,23 +12,11 @@ import { discordConfigured, discordMissing, handleAuth, requireMember, noAccess,
 import { PERMS, PERM_KEYS, RECHTE_SCHEMA, loadMatrix, permsFor, saveMatrix } from '../../lib/rechte.js';
 import { SCHICHT_SCHEMA, SCHICHT_MIGRATIONS, handleSchicht } from '../../lib/schicht.js';
 import { einheitFuer } from '../../lib/rollen.js';
+import { KATALOG, KATALOG_BY_NR, label, katalogFuer } from '../../lib/katalog.js';
 import { REGISTER_SCHEMA, handleRegister } from '../../lib/register.js';
 
 const STATUSES = ['Sauber', 'Bewährung', 'Fahndung'];
 
-// Strafgesetzbuch: Spannen [min, max]. Muss zu KATALOG in app.js passen.
-const KATALOG = {
-  '§ 1': { name: 'Körperverletzung', geld: [2000, 5000], haft: [10, 20] },
-  '§ 2': { name: 'Versuchter / Vollendeter Totschlag / Mord', geld: [15000, 30000], haft: [30, 60] },
-  '§ 3': { name: 'Geiselnahme / Entführung', geld: [10000, 20000], haft: [25, 45] },
-  '§ 4': { name: 'Widerstand gegen Vollstreckungsbeamte', geld: [3000, 7000], haft: [15, 25] },
-  '§ 5': { name: 'Amtsanmaßung', geld: [5000, 10000], haft: [15, 30] },
-  '§ 6': { name: 'Bestechung / Korruption', geld: [8000, 15000], haft: [20, 35] },
-  '§ 7': { name: 'Diebstahl & Raub', geld: [4000, 10000], haft: [15, 30] },
-  '§ 8': { name: 'Laden- & Bankraub', geld: [12000, 25000], haft: [30, 50] },
-  '§ 9': { name: 'Drogenbesitz & -handel', geld: [3000, 12000], haft: [10, 30] },
-  '§ 10': { name: 'Verstoß gegen das Waffengesetz', geld: [6000, 15000], haft: [20, 40] }
-};
 function clampTo(v, r) { v = Math.round(Number(v)); if (!Number.isFinite(v)) v = r[0]; return Math.min(r[1], Math.max(r[0], v)); }
 const HANDLE_RE = /^[A-Za-z0-9_.]{3,20}$/;
 let schemaReady = false;
@@ -154,6 +142,8 @@ async function ensureSchema(db) {
   }
   // Protokolleinträge, die nur sehen darf, wer die Kripo-Markierung sehen darf
   try { await db.prepare('ALTER TABLE log ADD COLUMN geheim INTEGER NOT NULL DEFAULT 0').run(); } catch { /* existiert schon */ }
+  // Katalognummer der Strafe (Paragraphen kommen im Katalog mehrfach vor)
+  try { await db.prepare('ALTER TABLE akte ADD COLUMN nr INTEGER').run(); } catch { /* existiert schon */ }
   for (const m of SCHICHT_MIGRATIONS) { try { await db.prepare(m).run(); } catch { /* existiert schon */ } }
   for (const m of MEMBER_MIGRATIONS) { try { await db.prepare(m).run(); } catch { /* existiert schon */ } }
   schemaReady = true;
@@ -243,6 +233,11 @@ export async function onRequest(context) {
   const parts = Array.isArray(params.path) ? params.path : params.path ? [params.path] : [];
   const method = request.method;
   const route = parts.join('/');
+
+  // --- Öffentlich: Strafkatalog (für die Seite) ---
+  if (route === 'katalog' && method === 'GET') {
+    return json({ katalog: KATALOG }, 200, { 'cache-control': 'public, max-age=300' });
+  }
 
   // --- Öffentlich: Status ---
   if (route === 'health') {
@@ -636,7 +631,7 @@ export async function onRequest(context) {
     // GET /api/people/:id/akte
     if (parts.length === 3 && parts[2] === 'akte' && method === 'GET') {
       const { results } = await db.prepare(
-        'SELECT id, delikt, geld, haft, datum, beamter, erledigt FROM akte WHERE person_num = ? ORDER BY id DESC'
+        'SELECT id, delikt, geld, haft, datum, beamter, erledigt, nr FROM akte WHERE person_num = ? ORDER BY id DESC'
       ).bind(num).all();
       return json({ akte: results });
     }
@@ -651,15 +646,15 @@ export async function onRequest(context) {
       const now = Date.now();
       const rows = [];
       for (const e of entries) {
-        const para = clean(e.para, 6);
-        const k = KATALOG[para];
-        if (!k) return fail(400, 'Unbekannter Paragraph.');
-        rows.push([para + ' ' + k.name, clampTo(e.geld ?? k.geld[0], k.geld), clampTo(e.haft ?? k.haft[0], k.haft)]);
+        const k = KATALOG_BY_NR[Number(e.nr)];
+        if (!k) return fail(400, 'Unbekannte Strafe.');
+        // Geldstrafe ist fest; haft = 1 heißt: ins Gefängnis bringen (keine Dauer)
+        rows.push([label(k), k.geld, k.haft ? 1 : 0, k.nr]);
       }
-      const stmts = rows.map(([delikt, geld, haft]) => db.prepare(
-        'INSERT INTO akte (person_num, delikt, geld, haft, datum, beamter, created_at, erledigt) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
-      ).bind(num, delikt, geld, haft, datum, beamter, now));
-      rows.forEach(([delikt, geld, haft]) => stmts.push(logIt('Strafe vergeben', num, delikt + ': ' + geld.toLocaleString('de-DE') + ' €, ' + haft + ' Min.')));
+      const stmts = rows.map(([delikt, geld, haft, nr]) => db.prepare(
+        'INSERT INTO akte (person_num, delikt, geld, haft, datum, beamter, created_at, erledigt, nr) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)'
+      ).bind(num, delikt, geld, haft, datum, beamter, now, nr));
+      rows.forEach(([delikt, geld, haft]) => stmts.push(logIt('Strafe vergeben', num, delikt + ': ' + geld.toLocaleString('de-DE') + ' €' + (haft ? ' + Haft' : ''))));
       await db.batch(stmts);
       return json({ ok: true, added: rows.length }, 201);
     }
@@ -686,19 +681,7 @@ export async function onRequest(context) {
       if (method === 'PATCH') {
         const b = await readBody(request);
         if (typeof b.erledigt !== 'boolean' && (b.geld != null || b.haft != null)) {
-          if (row.erledigt && !isAdmin) return fail(409, 'Erledigte Strafen kann nur ein Admin anpassen.');
-          const para = Object.keys(KATALOG).find((k) => row.delikt.indexOf(k + ' ') === 0);
-          if (!para) return fail(400, 'Für diesen Eintrag gibt es keinen Strafrahmen.');
-          const k = KATALOG[para];
-          const geld = clampTo(b.geld ?? row.geld, k.geld);
-          const haft = clampTo(b.haft ?? row.haft, k.haft);
-          if (geld === row.geld && haft === row.haft) return json({ ok: true, geld, haft, unchanged: true });
-          await db.batch([
-            db.prepare('UPDATE akte SET geld = ?, haft = ? WHERE id = ?').bind(geld, haft, eid),
-            logIt('Strafe angepasst', num, row.delikt + ': ' + Number(row.geld).toLocaleString('de-DE') + ' € zu ' +
-              geld.toLocaleString('de-DE') + ' €, ' + row.haft + ' zu ' + haft + ' Min.')
-          ]);
-          return json({ ok: true, geld, haft });
+          return fail(400, 'Strafen sind laut Katalog fest und können nicht angepasst werden.');
         }
         if (typeof b.erledigt !== 'boolean') return fail(400, 'Feld „erledigt“ fehlt.');
         await db.prepare('UPDATE akte SET erledigt = ? WHERE id = ?').bind(b.erledigt ? 1 : 0, eid).run();
@@ -709,7 +692,7 @@ export async function onRequest(context) {
       if (method === 'DELETE') {
         if (row.erledigt && !isAdmin) return fail(409, 'Erledigte Einträge kann nur ein Admin löschen.');
         await db.prepare('DELETE FROM akte WHERE id = ?').bind(eid).run();
-        await logIt(row.erledigt ? 'Strafe gelöscht (Admin)' : 'Strafe entfernt', num, row.delikt + ': ' + Number(row.geld).toLocaleString('de-DE') + ' €, ' + row.haft + ' Min.').run();
+        await logIt(row.erledigt ? 'Strafe gelöscht (Admin)' : 'Strafe entfernt', num, row.delikt + ': ' + Number(row.geld).toLocaleString('de-DE') + ' €' + (row.haft ? ' + Haft' : '')).run();
         return json({ ok: true });
       }
     }

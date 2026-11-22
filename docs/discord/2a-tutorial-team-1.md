@@ -11,11 +11,11 @@
 
 ## ⚖️ Strafe vergeben (nach der Festnahme)
 1. Person öffnen.
-2. Unter **„Strafe vergeben“** die Strafe suchen, z. B. `raub` oder `8`.
-3. **Anklicken** – die Person bekommt die Strafe sofort (Mindeststrafe).
-4. Höhere Strafe nötig? Im Strafregister bei der Strafe **„Anpassen“** → Geld und Haftzeit innerhalb der Spanne ändern.
-5. Oben im gelben Kasten steht, was **ausstehend** ist.
-6. Wenn gezahlt und abgesessen: **„Erledigt“**.
+2. Unter **„Strafe vergeben“** die Strafe suchen – Name, Paragraph oder Nummer, z. B. `raub`, `249` oder `stvo`.
+3. **Anklicken** – die Person bekommt die Strafe sofort, Betrag laut Strafkatalog.
+4. Oben im gelben Kasten steht, was **ausstehend** ist. Steht dort **„Haft – ins Gefängnis bringen“**, kommt die Person ins Gefängnis.
+5. Achte auf Zusätze wie **„Diebesgut einziehen“**.
+6. Wenn bezahlt (und ggf. im Gefängnis): **„Erledigt“**.
 
 Falsche Strafe geklickt? Bei der ausstehenden Strafe **„Entfernen“**.
 

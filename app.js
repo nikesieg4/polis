@@ -8,23 +8,26 @@
   var KEY_STORE = 'polis.key';
   var PREFS_KEY = 'polis.prefs';
 
-  // Strafgesetzbuch Berlin City Roleplay, Spannen als [min, max]
-  var KATALOG = [
-    { id: 'p1', group: 'Straftaten gegen das Leben & die Person', para: '§ 1', name: 'Körperverletzung', geld: [2000, 5000], haft: [10, 20] },
-    { id: 'p2', group: 'Straftaten gegen das Leben & die Person', para: '§ 2', name: 'Versuchter / Vollendeter Totschlag / Mord', geld: [15000, 30000], haft: [30, 60] },
-    { id: 'p3', group: 'Straftaten gegen das Leben & die Person', para: '§ 3', name: 'Geiselnahme / Entführung', geld: [10000, 20000], haft: [25, 45] },
-    { id: 'p4', group: 'Straftaten gegen die Staatsgewalt', para: '§ 4', name: 'Widerstand gegen Vollstreckungsbeamte', geld: [3000, 7000], haft: [15, 25] },
-    { id: 'p5', group: 'Straftaten gegen die Staatsgewalt', para: '§ 5', name: 'Amtsanmaßung', geld: [5000, 10000], haft: [15, 30] },
-    { id: 'p6', group: 'Straftaten gegen die Staatsgewalt', para: '§ 6', name: 'Bestechung / Korruption', geld: [8000, 15000], haft: [20, 35] },
-    { id: 'p7', group: 'Eigentums- & Vermögensdelikte', para: '§ 7', name: 'Diebstahl & Raub', geld: [4000, 10000], haft: [15, 30] },
-    { id: 'p8', group: 'Eigentums- & Vermögensdelikte', para: '§ 8', name: 'Laden- & Bankraub', geld: [12000, 25000], haft: [30, 50] },
-    { id: 'p9', group: 'Betäubungsmittel & Waffen', para: '§ 9', name: 'Drogenbesitz & -handel', geld: [3000, 12000], haft: [10, 30] },
-    { id: 'p10', group: 'Betäubungsmittel & Waffen', para: '§ 10', name: 'Verstoß gegen das Waffengesetz', geld: [6000, 15000], haft: [20, 40] }
-  ];
+  // Strafkatalog: wird vom Server geladen (lib/katalog.js), siehe loadKatalog()
+  var KATALOG = [];
+  function loadKatalog() {
+    return fetch('/api/katalog').then(function (r) { return r.ok ? r.json() : { katalog: [] }; })
+      .catch(function () { return { katalog: [] }; })
+      .then(function (d) {
+        KATALOG = d.katalog || [];
+        $('hbGruende').innerHTML = KATALOG.map(function (c) { return '<option value="' + esc(c.para + ' ' + c.name) + '">'; }).join('');
+        renderStrafen();
+      });
+  }
   var STATUSES = ['Sauber', 'Bewährung', 'Fahndung'];
-  // Paragraph zu einem Registereintrag („§ 8 Laden- & Bankraub“ -> Katalogeintrag)
-  function catFor(delikt) {
-    return KATALOG.find(function (c) { return String(delikt || '').indexOf(c.para + ' ') === 0; }) || null;
+  // Registereintrag -> Katalogeintrag (über die Nummer, sonst über den Text)
+  function catFor(e) {
+    if (!e) return null;
+    if (e.nr) { var byNr = KATALOG.find(function (c) { return c.nr === e.nr; }); if (byNr) return byNr; }
+    return KATALOG.find(function (c) { return c.para + ' ' + c.name === e.delikt; }) || null;
+  }
+  function katalogPreis(c) {
+    return euro(c.geld) + (c.haft ? ' + Haft' : '');
   }
   function clampTo(v, r) { v = Math.round(Number(v)); if (!isFinite(v)) v = r[0]; return Math.min(r[1], Math.max(r[0], v)); }
   var TEAMTAG = '<@&1476650119700156618>'; // Rolle @Präsidium-Team
@@ -49,7 +52,12 @@
       .map(function (w) { return w[0]; }).join('');
     return (s || '?').slice(0, 2).toUpperCase();
   }
-  function strafeText(e) { return euro(e.geld) + (e.haft ? ', ' + e.haft + ' Min. Haft' : ''); }
+  function strafeText(e) {
+    var c = catFor(e);
+    // haft: 1 = ins Gefängnis bringen; ältere Einträge hatten Minuten
+    var t = euro(e.geld) + (c ? (e.haft ? ' + Haft' : '') : (e.haft ? ', ' + e.haft + ' Min. Haft' : ''));
+    return t + (c && c.zusatz ? ', ' + c.zusatz : '');
+  }
   function chipClass(status) {
     return { 'Fahndung': 'chip-amber', 'Bewährung': 'chip-blue', 'Sauber': 'chip-green' }[status] || '';
   }
@@ -175,18 +183,18 @@
     addEntries: function (id, entries) {
       var d = today(), by = officerLabel();
       var rows = entries.map(function (x) {
-        var c = KATALOG.find(function (k) { return k.para === x.para; });
-        return { id: local.nextEntry++, delikt: c.para + ' ' + c.name, geld: c.geld[0], haft: c.haft[0], datum: d, beamter: by, erledigt: 0 };
+        var c = KATALOG.find(function (k) { return k.nr === x.nr; });
+        return { id: local.nextEntry++, nr: c.nr, delikt: c.para + ' ' + c.name, geld: c.geld, haft: c.haft ? 1 : 0, datum: d, beamter: by, erledigt: 0 };
       });
       local.akten[id] = rows.concat(local.akten[id] || []);
-      rows.forEach(function (r) { llog('Strafe vergeben', id, r.delikt + ': ' + euro(r.geld) + ', ' + r.haft + ' Min.'); });
+      rows.forEach(function (r) { llog('Strafe vergeben', id, r.delikt + ': ' + euro(r.geld) + (r.haft ? ' + Haft' : '')); });
       saveLocal();
       return Promise.resolve();
     },
     adjust: function (id, eid, geld, haft) {
-      var e = localEntry(id, eid), c = catFor(e && e.delikt);
+      var e = localEntry(id, eid), c = catFor(e);
       if (e && c) {
-        var g = clampTo(geld, c.geld), h = clampTo(haft, c.haft);
+        var g = c.geld, h = c.haft ? clampTo(haft, c.haft) : 0;
         if (g !== e.geld || h !== e.haft) {
           llog('Strafe angepasst', id, e.delikt + ': ' + euro(e.geld) + ' zu ' + euro(g) + ', ' + e.haft + ' zu ' + h + ' Min.');
           e.geld = g; e.haft = h; saveLocal();
@@ -208,7 +216,7 @@
     remove: function (id, eid) {
       var gone = localEntry(id, eid);
       local.akten[id] = (local.akten[id] || []).filter(function (e) { return e.id !== eid || e.erledigt; });
-      if (gone && !gone.erledigt) llog('Strafe entfernt', id, gone.delikt + ': ' + euro(gone.geld) + ', ' + gone.haft + ' Min.');
+      if (gone && !gone.erledigt) llog('Strafe entfernt', id, gone.delikt + ': ' + euro(gone.geld) + (gone.haft ? ' + Haft' : ''));
       saveLocal();
       return Promise.resolve();
     },
@@ -615,12 +623,13 @@
     akte = akte || [];
     var offen = akte.filter(function (e) { return !e.erledigt; });
     var oGeld = offen.reduce(function (a, e) { return a + e.geld; }, 0);
-    var oHaft = offen.reduce(function (a, e) { return a + e.haft; }, 0);
+    var oHaft = offen.some(function (e) { return e.haft > 0; });
 
     var openBox = !loaded ? '<div class="due due-none">Wird geladen</div>'
       : offen.length
         ? '<div class="due"><div class="due-label">Ausstehend</div>' +
-            '<div class="due-values"><span><strong>' + euro(oGeld) + '</strong> Geldstrafe</span><span><strong>' + oHaft + ' Min.</strong> Haft</span></div>' +
+            '<div class="due-values"><span><strong>' + euro(oGeld) + '</strong> Geldstrafe</span>' +
+              (oHaft ? '<span class="due-haft"><strong>Haft</strong> ins Gefängnis bringen</span>' : '<span class="muted">keine Haft</span>') + '</div>' +
             (has('strafen') ? '<button type="button" class="btn btn-primary" data-action="all-done"' + (ui.busy ? ' disabled' : '') + '>Erledigt</button>' : '') + '</div>'
         : '<div class="due due-none">Nichts ausstehend.</div>';
 
@@ -658,7 +667,6 @@
               (isAdmin ? '<button type="button" class="mini mini-danger" data-action="remove" data-done="1" data-eid="' + e.id + '">Löschen</button>' : '') + '</span>'
             : !has('strafen') ? '<span class="entry-actions"><span class="tag-open">Ausstehend</span></span>'
             : '<span class="entry-actions"><span class="tag-open">Ausstehend</span>' +
-              (catFor(e.delikt) ? '<button type="button" class="mini" data-action="adjust" data-eid="' + e.id + '">Anpassen</button>' : '') +
               '<button type="button" class="mini" data-action="done" data-eid="' + e.id + '">Erledigt</button>' +
               '<button type="button" class="mini mini-danger" data-action="remove" data-eid="' + e.id + '">Entfernen</button></span>') +
           '</div>' + adjustForm(e) + '</div>';
@@ -733,34 +741,26 @@
     ['hbKz', 'hbModell', 'hbGrund', 'hbBeweise'].forEach(function (id) { $(id).value = ''; });
   }
 
-  function adjustForm(e) {
-    if (!ui.edit || ui.edit.eid !== e.id || e.erledigt) return '';
-    var c = catFor(e.delikt);
-    if (!c) return '';
-    return '<div class="adjust">' +
-      '<div class="adjust-grid">' +
-        '<label>Geldstrafe (€)<input id="adjGeld" type="number" inputmode="numeric" min="' + c.geld[0] + '" max="' + c.geld[1] + '" step="500" value="' + esc(ui.edit.geld) + '">' +
-          '<span>' + euro(c.geld[0]) + ' bis ' + euro(c.geld[1]) + '</span></label>' +
-        '<label>Haft (Min.)<input id="adjHaft" type="number" inputmode="numeric" min="' + c.haft[0] + '" max="' + c.haft[1] + '" step="1" value="' + esc(ui.edit.haft) + '">' +
-          '<span>' + c.haft[0] + ' bis ' + c.haft[1] + ' Min.</span></label>' +
-      '</div>' +
-      '<div class="entry-actions">' +
-        '<button type="button" class="mini mini-primary" data-action="adj-save" data-eid="' + e.id + '"' + (ui.busy ? ' disabled' : '') + '>Speichern</button>' +
-        '<button type="button" class="mini" data-action="adj-cancel">Abbrechen</button>' +
-      '</div></div>';
-  }
+  // Strafen sind laut Katalog fest; Anpassen gibt es nicht mehr
+  function adjustForm() { return ''; }
 
   function renderStrafen() {
     var q = ui.sq.trim().toLowerCase().replace(/^§\s*/, '');
     var list = KATALOG.filter(function (c) {
       if (!q) return true;
-      var num = c.para.replace('§ ', '');
-      return num === q || c.name.toLowerCase().indexOf(q) !== -1 || c.group.toLowerCase().indexOf(q) !== -1;
+      // Nummer laut Aushang, Paragraph („249“, „StVO“) oder Name
+      return String(c.nr) === q || c.para.toLowerCase().replace(/§\s*/g, '').indexOf(q) !== -1 ||
+        c.name.toLowerCase().indexOf(q) !== -1 || c.gruppe.toLowerCase().indexOf(q) !== -1 ||
+        (c.hinweis || '').toLowerCase().indexOf(q) !== -1 || (c.zusatz || '').toLowerCase().indexOf(q) !== -1;
     });
-    $('strafeResults').innerHTML = list.length ? list.map(function (c) {
-      return '<button type="button" class="strafe-btn" data-action="give" data-para="' + esc(c.para) + '"' + (ui.busy ? ' disabled' : '') + '>' +
-        '<span class="name"><span class="para">' + esc(c.para) + '</span> ' + esc(c.name) + '</span>' +
-        '<span class="price">' + esc(euro(c.geld[0]) + ', ' + c.haft[0] + ' Min.') + '</span></button>';
+    var last = '';
+    $('strafeResults').innerHTML = !KATALOG.length ? '<span class="empty-note">Strafkatalog wird geladen</span>' : list.length ? list.map(function (c) {
+      var head = c.gruppe !== last ? '<h4 class="cat-group">' + esc(c.gruppe) + '</h4>' : '';
+      last = c.gruppe;
+      return head + '<button type="button" class="strafe-btn" data-action="give" data-nr="' + c.nr + '"' + (ui.busy ? ' disabled' : '') + '>' +
+        '<span class="name"><span class="nr">' + c.nr + '</span> <span class="para">' + esc(c.para) + '</span> ' + esc(c.name) +
+          (c.hinweis ? ' <span class="strafe-hinweis">' + esc(c.hinweis) + '</span>' : '') + '</span>' +
+        '<span class="price">' + esc(katalogPreis(c)) + (c.zusatz ? '<span class="strafe-zusatz">' + esc(c.zusatz) + '</span>' : '') + '</span></button>';
     }).join('') : '<span class="empty-note">Keine Strafe gefunden.</span>';
     $('strafeMsg').textContent = ui.msg;
   }
@@ -954,9 +954,9 @@
       createPerson($('create').dataset.handle, ($('newName') && $('newName').value.trim().slice(0, 60)) || '');
     } else if (a === 'give') {
       var p = findPerson(ui.selId);
-      var c = KATALOG.find(function (k) { return k.para === el.dataset.para; });
+      var c = KATALOG.find(function (k) { return k.nr === Number(el.dataset.nr); });
       if (!p || !c || ui.busy) return;
-      run(p, store.addEntries(p.id, [{ para: c.para, geld: c.geld[0], haft: c.haft[0] }]), c.para + ' ' + c.name + ' vergeben.');
+      run(p, store.addEntries(p.id, [{ nr: c.nr }]), c.para + ' ' + c.name + ' vergeben.' + (c.haft ? ' Person ins Gefängnis bringen.' : ''));
     } else if (a === 'all-done') {
       var p2 = findPerson(ui.selId);
       if (p2 && !ui.busy) run(p2, store.allDone(p2.id), '');
@@ -969,17 +969,17 @@
       if (!ea) return;
       ui.edit = { eid: ea.id, geld: ea.geld, haft: ea.haft };
       renderRecord();
-      var f = $('adjGeld'); if (f) f.focus();
+      var f = $('adjHaft'); if (f) f.focus();
     } else if (a === 'adj-cancel') {
       ui.edit = null; renderRecord();
     } else if (a === 'adj-save') {
       var ps = findPerson(ui.selId);
       var es = ps && (akten[ps.id] || []).find(function (x) { return x.id === Number(el.dataset.eid); });
-      var cs = es && catFor(es.delikt);
-      if (!es || !cs || ui.busy) return;
-      var g = clampTo($('adjGeld').value, cs.geld), h = clampTo($('adjHaft').value, cs.haft);
+      var cs = es && catFor(es);
+      if (!es || !cs || !cs.haft || ui.busy) return;
+      var h = clampTo($('adjHaft').value, cs.haft);
       ui.edit = null;
-      run(ps, store.adjust(ps.id, es.id, g, h), 'Strafe angepasst: ' + euro(g) + ', ' + h + ' Min. Haft.');
+      run(ps, store.adjust(ps.id, es.id, cs.geld, h), 'Haftzeit gespeichert: ' + h + ' Min.');
     } else if (a === 'done') {
       var p3 = findPerson(ui.selId);
       if (p3 && !ui.busy) run(p3, store.setDone(p3.id, Number(el.dataset.eid), true), '');
@@ -1053,7 +1053,7 @@
     $('hbGrund').focus();
   });
   $('hbCancel').addEventListener('click', closeHbForm);
-  $('hbGruende').innerHTML = KATALOG.map(function (c) { return '<option value="' + esc(c.para + ' ' + c.name) + '">'; }).join('');
+  loadKatalog();
   $('hbForm').addEventListener('submit', function (ev) {
     ev.preventDefault();
     var p = findPerson(ui.selId);

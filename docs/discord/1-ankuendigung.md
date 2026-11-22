@@ -6,7 +6,7 @@ Ab sofort arbeitet das gesamte PD – **Polizei, Kripo und SEK** – mit **POLIS
 
 ## Was POLIS kann
 - **Personensuche:** Einfach den Namen oder Roblox-Namen tippen – passende Personen erscheinen mit Avatar schon beim Tippen. Neue Spieler legt ihr mit einem Klick an.
-- **Strafregister:** Strafe suchen, anklicken – fertig. Oben steht sofort, was die Person noch zahlen bzw. absitzen muss.
+- **Strafregister:** Strafe aus dem Strafkatalog suchen, anklicken – fertig. Oben steht sofort, was die Person zahlen muss und ob sie ins Gefängnis kommt.
 - **Haftbefehle:** Ausstellen, vollstrecken und mit einem Klick fertig formatiert für Discord kopieren.
 - **Gruppierungen:** Kartelle und Gangs mit allen bekannten Mitgliedern auf einer Seite.
 - **Schicht:** Dienst starten, pausieren, beenden. Ihr seht eure Wochenzeit und wer gerade im Dienst ist.
