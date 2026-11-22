@@ -20,6 +20,15 @@
       });
   }
   var STATUSES = ['Sauber', 'Bewährung', 'Fahndung'];
+  // Reihenfolge in Listen: Fahndung oben, dann Bewährung, dann Sauber; innerhalb gleich bleibt die bisherige Reihenfolge
+  var STATUS_RANG = { 'Fahndung': 0, 'Bewährung': 1, 'Sauber': 2 };
+  function nachStatus(list) {
+    return list.map(function (p, i) { return { p: p, i: i }; }).sort(function (a, b) {
+      var ra = STATUS_RANG[a.p.status] != null ? STATUS_RANG[a.p.status] : 3;
+      var rb = STATUS_RANG[b.p.status] != null ? STATUS_RANG[b.p.status] : 3;
+      return ra - rb || a.i - b.i;
+    }).map(function (x) { return x.p; });
+  }
   // Registereintrag -> Katalogeintrag (über die Nummer, sonst über den Text)
   function catFor(e) {
     if (!e) return null;
@@ -467,6 +476,7 @@
       return p.name.toLowerCase().indexOf(q) !== -1 || p.id.toLowerCase().indexOf(q) !== -1 ||
         (p.gruppe || '').toLowerCase().indexOf(q) !== -1;
     });
+    list = nachStatus(list);
     $('count').textContent = list.length + ' Treffer' + (ui.error ? '. ' + ui.error : '');
     $('results').innerHTML = list.map(function (p) {
       return '<button type="button" class="person' + (p.id === ui.selId ? ' selected' : '') + '" data-action="select" data-id="' + esc(p.id) + '">' +
@@ -587,7 +597,7 @@
       ? '<p class="info-text gruppe-text">' + esc(d.beschreibung) + '</p>' +
         (d.updatedBy ? '<span class="muted small">Zuletzt geändert von ' + esc(d.updatedBy) + (d.updatedAt ? ', ' + esc(dateTime(d.updatedAt)) : '') + '</span>' : '')
       : '<span class="empty-note">Noch keine Beschreibung.</span>';
-    $('gruppeMembers').innerHTML = d.mitglieder.length ? d.mitglieder.map(function (p) {
+    $('gruppeMembers').innerHTML = d.mitglieder.length ? nachStatus(d.mitglieder).map(function (p) {
       return '<button type="button" class="person" data-action="select" data-id="' + esc(p.id) + '">' +
         '<span class="avatar">' + avatarHtml(p) + '</span>' +
         '<span class="person-main"><strong>' + esc(p.name) + '</strong><span>@' + esc(p.roblox) + '  ' + esc(p.id) + '</span></span>' +
