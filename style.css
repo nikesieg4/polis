@@ -438,3 +438,9 @@ body.no-officer #hbNewBtn { opacity: 0.45; cursor: not-allowed; }
 .due-haft { color: #FFB3B3; }
 .due-haft strong { color: #FFB3B3 !important; }
 .auto-fahndung { color: var(--amber); font-weight: 600; min-height: 34px; display: inline-flex; align-items: center; }
+
+/* Polizei-Register: ganze Liste zeigen, Seite scrollt (kein versteckter Scrollbereich) */
+#bList { max-height: none; overflow: visible; }
+@media (min-width: 900px) {
+  #viewBeamte .col-record { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; }
+}

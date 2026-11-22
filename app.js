@@ -1508,6 +1508,8 @@
   $('bList').addEventListener('click', function (ev) {
     var el = ev.target.closest('[data-bid]'); if (!el) return;
     bSel = Number(el.dataset.bid); bEdit = null; renderBeamte();
+    // Handy: Liste und Details stehen untereinander, also zu den Details springen
+    if (window.innerWidth < 900) $('bDetail').scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   $('bDetail').addEventListener('click', function (ev) {
     if (ev.target.id === 'bEditBtn') openBForm(bData.beamte.find(function (x) { return x.id === bSel; }));
