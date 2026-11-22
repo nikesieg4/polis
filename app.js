@@ -22,10 +22,16 @@
   var STATUSES = ['Sauber', 'Bewährung', 'Fahndung'];
   // Reihenfolge in Listen: Fahndung oben, dann Bewährung, dann Sauber; innerhalb gleich bleibt die bisherige Reihenfolge
   var STATUS_RANG = { 'Fahndung': 0, 'Bewährung': 1, 'Sauber': 2 };
+  // Wer ausstehende Strafen hat, ist automatisch in Fahndung; sonst gilt der eingestellte Status
+  function offeneStrafen(p) {
+    var a = akten[p.id];
+    return Array.isArray(a) ? a.filter(function (e) { return !e.erledigt; }).length : (p.offen || 0);
+  }
+  function statusVon(p) { return offeneStrafen(p) > 0 ? 'Fahndung' : p.status; }
   function nachStatus(list) {
     return list.map(function (p, i) { return { p: p, i: i }; }).sort(function (a, b) {
-      var ra = STATUS_RANG[a.p.status] != null ? STATUS_RANG[a.p.status] : 3;
-      var rb = STATUS_RANG[b.p.status] != null ? STATUS_RANG[b.p.status] : 3;
+      var ra = STATUS_RANG[statusVon(a.p)] != null ? STATUS_RANG[statusVon(a.p)] : 3;
+      var rb = STATUS_RANG[statusVon(b.p)] != null ? STATUS_RANG[statusVon(b.p)] : 3;
       return ra - rb || a.i - b.i;
     }).map(function (x) { return x.p; });
   }
@@ -486,7 +492,7 @@
 (p.kripo ? '<span class="person-kripo" title="' + esc(p.kripoHinweis || 'Kripo') + '">Kripo</span>' : '') +
         (p.haftbefehle ? '<span class="person-hb">Haftbefehl</span>' : '') +
         (p.offen ? '<span class="person-open">ausstehend</span>' : '<span class="person-count">' + (p.count || 0) + (p.count === 1 ? ' Eintrag' : ' Einträge') + '</span>') +
-        '<span class="chip ' + chipClass(p.status) + '">' + esc(p.status) + '</span></button>';
+        '<span class="chip ' + chipClass(statusVon(p)) + '">' + esc(statusVon(p)) + '</span></button>';
     }).join('');
 
     var handle = /^[a-z0-9_.]{3,20}$/.test(q) ? q : '';
@@ -604,7 +610,7 @@
         '<span class="person-count">' + esc(p.gruppeRang || 'ohne Rang') + '</span>' +
 (p.kripo ? '<span class="person-kripo" title="' + esc(p.kripoHinweis || 'Kripo') + '">Kripo</span>' : '') +
         (p.haftbefehle ? '<span class="person-hb">Haftbefehl</span>' : '') +
-        '<span class="chip ' + chipClass(p.status) + '">' + esc(p.status) + '</span></button>';
+        '<span class="chip ' + chipClass(statusVon(p)) + '">' + esc(statusVon(p)) + '</span></button>';
     }).join('') : '<span class="empty-note">Keine Mitglieder eingetragen.</span>';
   }
   function renderRecord() {
@@ -653,12 +659,14 @@
           '<div class="record-head"><span class="avatar">' + avatarHtml(p) + '</span>' +
             '<div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:0"><h2>' + esc(p.name) + '</h2>' +
             '<span class="muted small mono">@' + esc(p.roblox) + '  ' + esc(p.id) + '</span></div>' +
-            '<span class="chip ' + chipClass(p.status) + '">' + esc(p.status) + '</span></div>' +
+            '<span class="chip ' + chipClass(statusVon(p)) + '">' + esc(statusVon(p)) + '</span></div>' +
           '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">' +
-            '<label class="small muted" style="display:flex;align-items:center;gap:8px">Status ' +
-              '<select class="status-select" data-action="status"' + (has('personen') ? '' : ' disabled') + '>' + STATUSES.map(function (s) {
-                return '<option' + (s === p.status ? ' selected' : '') + '>' + s + '</option>';
-              }).join('') + '</select></label>' +
+            (offeneStrafen(p) > 0
+              ? '<span class="small auto-fahndung">Fahndung automatisch wegen ausstehender Strafen</span>'
+              : '<label class="small muted" style="display:flex;align-items:center;gap:8px">Status ' +
+                '<select class="status-select" data-action="status"' + (has('personen') ? '' : ' disabled') + '>' + STATUSES.map(function (s) {
+                  return '<option' + (s === p.status ? ' selected' : '') + '>' + s + '</option>';
+                }).join('') + '</select></label>') +
             '<label class="small muted" style="display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer">' +
               '<input type="checkbox" data-action="danger"' + (p.danger ? ' checked' : '') + (has('personen') ? '' : ' disabled') + ' style="width:18px;height:18px;accent-color:#FF6B6B;margin:0"> Gefährlich</label>' +
           '</div>' +
@@ -1119,7 +1127,7 @@
         i++;
         return '<div class="sug-item" role="option" id="sug' + i + '" data-i="' + i + '">' + sugAvatar(p.robloxId ? '/api/avatar/' + p.robloxId : '', p.name) +
           '<span class="person-main"><strong>' + esc(p.name) + '</strong><span>@' + esc(p.roblox) + '</span></span>' +
-          (p.haftbefehle ? '<span class="person-hb">Haftbefehl</span>' : '') + '<span class="chip ' + chipClass(p.status) + '">' + esc(p.status) + '</span></div>';
+          (p.haftbefehle ? '<span class="person-hb">Haftbefehl</span>' : '') + '<span class="chip ' + chipClass(statusVon(p)) + '">' + esc(statusVon(p)) + '</span></div>';
       }).join('');
     }
     if (mode === 'server' && q.length >= 3) {

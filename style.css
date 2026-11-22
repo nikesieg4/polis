@@ -437,3 +437,4 @@ body.no-officer #hbNewBtn { opacity: 0.45; cursor: not-allowed; }
 .strafe-hinweis { font-size: 11px; color: #C9B5FF; background: #2D1F4A; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
 .due-haft { color: #FFB3B3; }
 .due-haft strong { color: #FFB3B3 !important; }
+.auto-fahndung { color: var(--amber); font-weight: 600; min-height: 34px; display: inline-flex; align-items: center; }
