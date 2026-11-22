@@ -307,7 +307,7 @@
         return r.json().catch(function () { return {}; }).then(function (d) {
           if (authMode === 'discord' && (r.status === 401 || (r.status === 403 && d.login))) { me = null; showDiscordGate(d.error); }
           else if (r.status === 401 && path !== 'admin') { showGate('Dienstschlüssel ungültig. Bitte neu anmelden.'); }
-          if (!r.ok) { var err = new Error(d.error || ('Fehler ' + r.status)); err.status = r.status; throw err; }
+          if (!r.ok) { var err = new Error(d.error || ('Fehler ' + r.status)); err.status = r.status; err.vorhandenId = d.vorhandenId; throw err; }
           return d;
         });
       });
@@ -1525,7 +1525,15 @@
       discord: $('bDiscord').value.trim(), eintritt: $('bEintritt').value, ausbildungen: $('bAusb').value.trim(), notizen: $('bNotizen').value.trim() };
     var req = bEdit === 'neu' ? api('beamte', { method: 'POST', body: body }) : api('beamte/' + bEdit, { method: 'PUT', body: body });
     req.then(function (d) { bSel = d.beamter.id; bEdit = null; return loadBeamte(); })
-      .catch(function (e) { $('bError').textContent = e.message; });
+      .catch(function (e) {
+        $('bError').textContent = e.message;
+        if (e.vorhandenId) {
+          var a = document.createElement('button');
+          a.type = 'button'; a.className = 'linkbtn'; a.textContent = 'Vorhandenen Eintrag öffnen';
+          a.addEventListener('click', function () { bSel = e.vorhandenId; bEdit = null; renderBeamte(); });
+          $('bError').appendChild(document.createTextNode(' ')); $('bError').appendChild(a);
+        }
+      });
   });
   $('bDelete').addEventListener('click', function () {
     var b = bData.beamte.find(function (x) { return x.id === bEdit; });
