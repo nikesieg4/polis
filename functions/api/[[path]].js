@@ -9,7 +9,7 @@
  */
 
 import { discordConfigured, discordMissing, handleAuth, requireMember, noAccess, guildRoleList, MEMBER_SCHEMA, MEMBER_MIGRATIONS } from '../../lib/discord.js';
-import { PERMS, PERM_KEYS, RECHTE_SCHEMA, loadMatrix, permsFor, saveMatrix } from '../../lib/rechte.js';
+import { PERMS, PERM_KEYS, RECHTE_SCHEMA, loadMatrix, permsFor, saveMatrix, aussperrFehler } from '../../lib/rechte.js';
 import { SCHICHT_SCHEMA, SCHICHT_MIGRATIONS, handleSchicht } from '../../lib/schicht.js';
 import { einheitFuer } from '../../lib/rollen.js';
 import { KATALOG, KATALOG_BY_NR, label, katalogFuer } from '../../lib/katalog.js';
@@ -407,11 +407,16 @@ export async function onRequest(context) {
     roleList = roleList.length ? roleList : await guildRoleList(env);
     if (method === 'GET') {
       const m = await loadMatrix(env, db, roleList);
-      return json({ perms: PERMS, rollen: roleList.map((r) => ({ id: r.id, name: r.name, admin: r.admin })), matrix: m.matrix, gespeichert: m.gespeichert });
+      return json({ perms: PERMS, rollen: roleList.map((r) => ({ id: r.id, name: r.name })), matrix: m.matrix, gespeichert: m.gespeichert });
     }
     if (method === 'PUT') {
       const b = await readBody(request);
-      await saveMatrix(db, b.matrix || {}, roleList.filter((r) => !r.admin).map((r) => r.id));
+      const valid = new Set(roleList.map((r) => r.id));
+      const matrix = {};
+      for (const k of PERM_KEYS) matrix[k] = (Array.isArray((b.matrix || {})[k]) ? b.matrix[k] : []).map(String).filter((id) => valid.has(id));
+      const f = aussperrFehler(matrix);
+      if (f) return fail(400, f);
+      await saveMatrix(db, matrix, [...valid]);
       await logIt('Rechte geändert', null, 'Rechtetabelle gespeichert').run();
       return json({ ok: true });
     }

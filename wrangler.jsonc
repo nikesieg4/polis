@@ -11,7 +11,7 @@
   // Nicht geheime Discord-Werte. Client Secret und Bot-Token als Secret im Dashboard anlegen.
   "vars": {
     "DISCORD_CLIENT_ID": "1573745208791670795",
-    "DISCORD_GUILD_ID": "1573743287645376684"
+    "DISCORD_GUILD_ID": "1455870076539375702"
   },
   "d1_databases": [
     {

@@ -1552,7 +1552,7 @@
   }
   function renderRechte() {
     if (!rData) return;
-    var rollen = rData.rollen.filter(function (r) { return !r.admin; });
+    var rollen = rData.rollen;
     // Rechte oben als Spalten, Rollen links als Zeilen
     $('rTable').innerHTML = '<thead><tr><th class="sticky corner" scope="col">Rolle</th>' + rData.perms.map(function (pm) {
       return '<th class="perm-col" scope="col" title="' + esc(pm.desc || '') + '"><span>' + esc(pm.label) + '</span></th>';
