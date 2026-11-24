@@ -201,7 +201,7 @@
       var d = today(), by = officerLabel();
       var rows = entries.map(function (x) {
         var c = KATALOG.find(function (k) { return k.nr === x.nr; });
-        return { id: local.nextEntry++, nr: c.nr, delikt: c.para + ' ' + c.name, geld: c.geld, haft: c.haft ? 1 : 0, datum: d, beamter: by, erledigt: 0 };
+        return { id: local.nextEntry++, nr: c.nr, delikt: c.para + ' ' + c.name, geld: c.geld, haft: c.haft ? 1 : 0, datum: d, beamter: by, erledigt: 0, created_at: Date.now() };
       });
       local.akten[id] = rows.concat(local.akten[id] || []);
       rows.forEach(function (r) { llog('Strafe vergeben', id, r.delikt + ': ' + euro(r.geld) + (r.haft ? ' + Haft' : '')); });
@@ -679,7 +679,7 @@
 
     hist.innerHTML = '<section class="card"><h2>Strafregister</h2><div class="entries">' +
       (!loaded ? '<span class="empty-note">Wird geladen</span>' : akte.length ? akte.map(function (e) {
-        return '<div class="entry' + (e.erledigt ? ' done' : ' open') + '"><div class="entry-top"><strong>' + esc(e.delikt) + '</strong><span>' + esc(e.datum) + '</span></div>' +
+        return '<div class="entry' + (e.erledigt ? ' done' : ' open') + '"><div class="entry-top"><strong>' + esc(e.delikt) + '</strong><span>' + esc(e.created_at ? dateTime(e.created_at) : e.datum) + '</span></div>' +
           '<span class="strafe">' + esc(strafeText(e)) + '</span>' +
           '<div class="entry-foot"><span class="by">Beamter ' + esc(e.beamter || 'Unbekannt') + '</span>' +
           (!e.erledigt && ui.edit && ui.edit.eid === e.id ? '' : e.erledigt
