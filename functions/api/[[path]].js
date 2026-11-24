@@ -122,6 +122,8 @@ function personOut(r) {
     count: r.count || 0,
     offen: r.offen || 0,
     haftbefehle: r.hb || 0,
+    // Zeitpunkt des neuesten Eintrags (Strafe oder Haftbefehl), sonst Anlage der Person
+    letzterEintrag: Math.max(r.letzte_strafe || 0, r.letzter_hb || 0, r.created_at || 0),
     gruppe: r.gruppe || '',
     gruppeRang: r.gruppe_rang || '',
     beschreibung: r.beschreibung || ''
@@ -444,7 +446,9 @@ export async function onRequest(context) {
       `SELECT p.*,
               (SELECT COUNT(*) FROM akte a WHERE a.person_num = p.num) AS count,
               (SELECT COUNT(*) FROM akte a WHERE a.person_num = p.num AND a.erledigt = 0) AS offen,
-              (SELECT COUNT(*) FROM haftbefehle h WHERE h.person_num = p.num AND h.status = 'offen') AS hb
+              (SELECT COUNT(*) FROM haftbefehle h WHERE h.person_num = p.num AND h.status = 'offen') AS hb,
+                (SELECT MAX(created_at) FROM akte a WHERE a.person_num = p.num) AS letzte_strafe,
+                (SELECT MAX(created_at) FROM haftbefehle h WHERE h.person_num = p.num) AS letzter_hb
          FROM people p WHERE p.gruppe = ? COLLATE NOCASE ORDER BY p.name`
     ).bind(name).all();
     if (!g && !results.length) return fail(404, 'Gruppierung nicht gefunden.');
@@ -522,7 +526,9 @@ export async function onRequest(context) {
         `SELECT p.*,
                 (SELECT COUNT(*) FROM akte a WHERE a.person_num = p.num) AS count,
                 (SELECT COUNT(*) FROM akte a WHERE a.person_num = p.num AND a.erledigt = 0) AS offen,
-                (SELECT COUNT(*) FROM haftbefehle h WHERE h.person_num = p.num AND h.status = 'offen') AS hb
+                (SELECT COUNT(*) FROM haftbefehle h WHERE h.person_num = p.num AND h.status = 'offen') AS hb,
+                (SELECT MAX(created_at) FROM akte a WHERE a.person_num = p.num) AS letzte_strafe,
+                (SELECT MAX(created_at) FROM haftbefehle h WHERE h.person_num = p.num) AS letzter_hb
            FROM people p ORDER BY p.num DESC`
       ).all();
       return json({ people: results.map((r) => pOut(r)) });
@@ -651,7 +657,7 @@ export async function onRequest(context) {
     // GET /api/people/:id/akte
     if (parts.length === 3 && parts[2] === 'akte' && method === 'GET') {
       const { results } = await db.prepare(
-        'SELECT id, delikt, geld, haft, datum, beamter, erledigt, nr FROM akte WHERE person_num = ? ORDER BY id DESC'
+        'SELECT id, delikt, geld, haft, datum, beamter, erledigt, nr, created_at FROM akte WHERE person_num = ? ORDER BY id DESC'
       ).bind(num).all();
       return json({ akte: results });
     }

@@ -32,7 +32,10 @@
     return list.map(function (p, i) { return { p: p, i: i }; }).sort(function (a, b) {
       var ra = STATUS_RANG[statusVon(a.p)] != null ? STATUS_RANG[statusVon(a.p)] : 3;
       var rb = STATUS_RANG[statusVon(b.p)] != null ? STATUS_RANG[statusVon(b.p)] : 3;
-      return ra - rb || a.i - b.i;
+      if (ra !== rb) return ra - rb;
+      // Fahndung: neuester Eintrag (Strafe oder Haftbefehl) zuerst
+      if (ra === 0) return (b.p.letzterEintrag || 0) - (a.p.letzterEintrag || 0) || a.i - b.i;
+      return a.i - b.i;
     }).map(function (x) { return x.p; });
   }
   // Registereintrag -> Katalogeintrag (über die Nummer, sonst über den Text)
@@ -790,6 +793,7 @@
       var a = akten[p.id] || [];
       p.count = a.length;
       p.offen = a.filter(function (e) { return !e.erledigt; }).length;
+      a.forEach(function (e) { if (e.created_at > (p.letzterEintrag || 0)) p.letzterEintrag = e.created_at; });
       ui.busy = false;
       renderResults(); renderRecord();
     });
@@ -1087,6 +1091,7 @@
     }).then(function () {
       btn.disabled = false; closeHbForm();
       ui.hbMsg = 'Haftbefehl ausgestellt.';
+      p.letzterEintrag = Math.max(p.letzterEintrag || 0, Date.now());
       return afterHbChange(p);
     }).catch(function (e) { btn.disabled = false; $('hbFormError').textContent = e.message; });
   });
