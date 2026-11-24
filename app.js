@@ -33,8 +33,8 @@
       var ra = STATUS_RANG[statusVon(a.p)] != null ? STATUS_RANG[statusVon(a.p)] : 3;
       var rb = STATUS_RANG[statusVon(b.p)] != null ? STATUS_RANG[statusVon(b.p)] : 3;
       if (ra !== rb) return ra - rb;
-      // Fahndung: neuester Eintrag (Strafe oder Haftbefehl) zuerst
-      if (ra === 0) return (b.p.letzterEintrag || 0) - (a.p.letzterEintrag || 0) || a.i - b.i;
+      // Fahndung und Bewährung: neuester Eintrag (Strafe oder Haftbefehl) zuerst
+      if (ra === 0 || ra === 1) return (b.p.letzterEintrag || 0) - (a.p.letzterEintrag || 0) || a.i - b.i;
       return a.i - b.i;
     }).map(function (x) { return x.p; });
   }
