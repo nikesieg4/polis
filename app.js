@@ -1329,7 +1329,7 @@
   }, 20000);
 
   // ======================================================================
-  // Bereiche: Datenbank, Schicht, Polizei-Register, Rechte
+  // Bereiche: Datenbank, Schicht, Polizei-Register, Grundrisse, Rechte
   // ======================================================================
   var view = 'db';
   function renderPermUi() {
@@ -1337,10 +1337,12 @@
     var show = {
       schicht: server, // „Im Dienst“ sieht jeder; die eigene Uhr nur mit Recht „schicht“
       beamte: server && has('register_sehen'),
+      plan: server && has('grundrisse'),
       rechte: server && authMode === 'discord' && has('rechte')
     };
     $('navSchicht').hidden = !show.schicht; $('navBeamte').hidden = !show.beamte; $('navRechte').hidden = !show.rechte;
-    $('mainNav').hidden = !(show.schicht || show.beamte || show.rechte);
+    $('navPlan').hidden = !show.plan;
+    $('mainNav').hidden = !(show.schicht || show.beamte || show.plan || show.rechte);
     if (view !== 'db' && !show[view]) view = 'db';
     document.querySelectorAll('.nav-btn').forEach(function (b) {
       var on = b.dataset.view === view;
@@ -1349,6 +1351,7 @@
     });
     $('viewDb').hidden = view !== 'db'; $('viewSchicht').hidden = view !== 'schicht';
     $('viewBeamte').hidden = view !== 'beamte'; $('viewRechte').hidden = view !== 'rechte';
+    $('viewPlan').hidden = view !== 'plan';
     renderTabs(); renderRecord();
   }
   function setView(v) {
@@ -1356,9 +1359,13 @@
     if (v === 'schicht') loadSchicht();
     if (v === 'beamte') loadBeamte();
     if (v === 'rechte') loadRechte();
+    if (v === 'plan') { loadGrundrisse(); gRender(); }
   }
   document.querySelectorAll('.nav-btn').forEach(function (b) {
-    b.addEventListener('click', function () { setView(b.dataset.view); });
+    b.addEventListener('click', function () {
+      if (view === 'plan' && b.dataset.view !== 'plan' && !gVerwerfenOk()) return;
+      setView(b.dataset.view);
+    });
   });
 
   // ---------- Schicht ----------
@@ -1567,6 +1574,468 @@
     if (!b || !confirm(b.name + ' aus dem Register entfernen?')) return;
     api('beamte/' + b.id, { method: 'DELETE' }).then(function () { bSel = null; bEdit = null; return loadBeamte(); })
       .catch(function (e) { $('bError').textContent = e.message; });
+  });
+
+  // ---------- Grundrisse (Recht „grundrisse“) ----------
+  // Ein Plan besteht aus Elementen in Studs: Räume (Rechteck), Wände/Türen/Fenster (Linie), Markierungen (Punkt).
+  var gLetzteArt = 'Sonstiges', gList = null, gArten = [], gPlan = null, gSel = -1, gTool = 'sel', gDirty = false, gUndo = [], gDrag = null, gMess = null;
+  var gV = { x: -5, y: -5, s: 14 }; // linke obere Ecke in Studs, Pixel pro Stud
+  var GFARBE = { Eingang: '#5BE3A0', Tresor: '#F5B841', Kasse: '#8FB4FF', Vitrine: '#C3A6FF', Kamera: '#FF7A7A', Alarm: '#FF5C5C', Deckung: '#9AA6BF', Treppe: '#7FD6E8', Sonstiges: '#E6EBF5' };
+  // Schrift-Umrandung in Pixeln: hängt vom Maßstab ab, deshalb als Funktion
+  function gStyle(s) { return GSTYLE.replace('__HALO__', String(3 / s)); }
+  var GSTYLE = '<style>' +
+    '.g-raum{fill:rgba(76,141,255,.10);stroke:#4C8DFF;stroke-width:1.5px;vector-effect:non-scaling-stroke}' +
+    '.g-wand{stroke:#E6EBF5;stroke-width:4px;stroke-linecap:square;vector-effect:non-scaling-stroke}' +
+    '.g-tuer{stroke:#F5B841;stroke-width:4px;vector-effect:non-scaling-stroke}' +
+    '.g-fenster{stroke:#7FD6E8;stroke-width:3px;stroke-dasharray:6 3;vector-effect:non-scaling-stroke}' +
+    '.g-hit{stroke:transparent;stroke-width:16px;vector-effect:non-scaling-stroke}' +
+    '.g-mess{stroke:#5BE3A0;stroke-width:2px;stroke-dasharray:5 4;vector-effect:non-scaling-stroke}' +
+    '.g-neu{fill:rgba(91,227,160,.12);stroke:#5BE3A0;stroke-width:2px;stroke-dasharray:5 4;vector-effect:non-scaling-stroke}' +
+    '.g-sel .g-raum,.g-sel .g-wand,.g-sel .g-tuer,.g-sel .g-fenster{stroke:#5BE3A0}' +
+    '.g-sel circle{stroke:#5BE3A0;stroke-width:3px}' +
+    '.g-h{fill:#0A101C;stroke:#5BE3A0;stroke-width:2px;vector-effect:non-scaling-stroke;cursor:move}' +
+    '.g-grid1{stroke:#162033;stroke-width:1px;vector-effect:non-scaling-stroke}' +
+    '.g-grid10{stroke:#24304A;stroke-width:1px;vector-effect:non-scaling-stroke}' +
+    '.g-achse{stroke:#3A4A6E;stroke-width:1px;vector-effect:non-scaling-stroke}' +
+    'text{font-family:IBM Plex Sans,system-ui,sans-serif;fill:#E6EBF5;paint-order:stroke;stroke:#0A101C;stroke-width:__HALO__px;stroke-linejoin:round}' +
+    '.g-mass{font-family:IBM Plex Mono,ui-monospace,monospace;fill:#9AA6BF}' +
+    '.g-masstark{font-family:IBM Plex Mono,ui-monospace,monospace;fill:#5BE3A0}' +
+    '</style>';
+
+  function gNum(n) { return String(Math.round(n * 10) / 10).replace('.', ','); }
+  function gLen(e) { return Math.sqrt(Math.pow(e.x2 - e.x1, 2) + Math.pow(e.y2 - e.y1, 2)); }
+  function gSnapV() { return Number($('gSnap').value) || 1; }
+  function gSnapN(n) { var r = gSnapV(); return Math.round(n / r) * r; }
+  function gClone(o) { return JSON.parse(JSON.stringify(o)); }
+  function gIstLinie(e) { return e && (e.t === 'wand' || e.t === 'tuer' || e.t === 'fenster'); }
+  var G_NAMEN = { raum: 'Raum', wand: 'Wand', tuer: 'Tür', fenster: 'Fenster', punkt: 'Markierung' };
+
+  function loadGrundrisse() {
+    return api('grundrisse').then(function (d) { gList = d.grundrisse; gArten = d.arten || []; renderGList(); })
+      .catch(function (e) { $('gList').innerHTML = '<div class="placeholder">' + esc(e.message) + '</div>'; });
+  }
+  function renderGList() {
+    if (!gList) return;
+    $('gList').innerHTML = gList.length ? gList.map(function (g) {
+      return '<button type="button" class="person' + (gPlan && g.id === gPlan.id ? ' selected' : '') + '" data-gid="' + g.id + '">' +
+        '<span class="person-main"><strong>' + esc(g.name) + '</strong><span>' + g.elemente + ' Elemente' +
+        (g.updatedAt ? ', ' + esc(dateTime(g.updatedAt)) : '') + '</span></span></button>';
+    }).join('') : '<div class="placeholder">Noch keine Grundrisse.</div>';
+  }
+  function gVerwerfenOk() { return !gDirty || confirm('Ungespeicherte Änderungen am Grundriss verwerfen?'); }
+  $('gList').addEventListener('click', function (ev) {
+    var b = ev.target.closest('[data-gid]');
+    if (!b || (gPlan && Number(b.dataset.gid) === gPlan.id) || !gVerwerfenOk()) return;
+    gOeffne(Number(b.dataset.gid));
+  });
+  function gOeffne(id) {
+    $('gMsg').textContent = 'Wird geladen';
+    return api('grundrisse/' + id).then(function (d) {
+      gPlan = d.grundriss; gSel = -1; gUndo = []; gMess = null; gSetDirty(false);
+      $('gName').value = gPlan.name; $('gNotizen').value = gPlan.notizen || '';
+      $('gEmpty').hidden = true; $('gEditor').hidden = false; $('gMsg').textContent = '';
+      renderGList(); gFit(); gProps();
+    }).catch(function (e) { $('gMsg').textContent = e.message; });
+  }
+  $('gNewForm').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var name = $('gNewName').value.trim();
+    if (!name || !gVerwerfenOk()) return;
+    api('grundrisse', { method: 'POST', body: { name: name } }).then(function (d) {
+      $('gNewName').value = '';
+      return loadGrundrisse().then(function () { return gOeffne(d.grundriss.id); });
+    }).catch(function (e) { alert(e.message); });
+  });
+  function gSetDirty(v) {
+    gDirty = v;
+    $('gSave').disabled = !v;
+    if (v) $('gMsg').textContent = 'Nicht gespeichert';
+  }
+  function gAenderung() { gSetDirty(true); }
+  function gMerke() {
+    gUndo.push(JSON.stringify(gPlan.elemente));
+    if (gUndo.length > 100) gUndo.shift();
+  }
+  function gRueckgaengig() {
+    if (!gUndo.length) return;
+    gPlan.elemente = JSON.parse(gUndo.pop()); gSel = -1; gAenderung(); gRender(); gProps();
+  }
+  function gSpeichern() {
+    if (!gPlan || !gDirty) return;
+    $('gSave').disabled = true; $('gMsg').textContent = 'Wird gespeichert';
+    api('grundrisse/' + gPlan.id, { method: 'PUT', body: { stand: gPlan.updatedAt, name: $('gName').value, notizen: $('gNotizen').value, elemente: gPlan.elemente } })
+      .then(function (d) {
+        gPlan.updatedAt = d.grundriss.updatedAt; gPlan.name = d.grundriss.name; $('gName').value = gPlan.name;
+        gSetDirty(false); $('gMsg').textContent = 'Gespeichert'; loadGrundrisse();
+      })
+      .catch(function (e) { $('gSave').disabled = false; $('gMsg').textContent = e.message; });
+  }
+  $('gSave').addEventListener('click', gSpeichern);
+  $('gName').addEventListener('input', gAenderung);
+  $('gNotizen').addEventListener('input', gAenderung);
+  $('gDel').addEventListener('click', function () {
+    if (!gPlan || !confirm('Grundriss „' + gPlan.name + '“ endgültig löschen?')) return;
+    api('grundrisse/' + gPlan.id, { method: 'DELETE' }).then(function () {
+      gPlan = null; gSetDirty(false); $('gEditor').hidden = true; $('gEmpty').hidden = false; loadGrundrisse();
+    }).catch(function (e) { $('gMsg').textContent = e.message; });
+  });
+  window.addEventListener('beforeunload', function (ev) { if (gDirty) { ev.preventDefault(); ev.returnValue = ''; } });
+
+  // Lauf-Rechner
+  $('gTempo').value = prefs.gTempo || 16;
+  function gRechne() {
+    var t = Number(String($('gSek').value).replace(',', '.')) || 0, v = Number(String($('gTempo').value).replace(',', '.')) || 0;
+    $('gErgebnis').textContent = '= ' + gNum(t * v) + ' Studs';
+  }
+  $('gSek').addEventListener('input', gRechne);
+  $('gTempo').addEventListener('input', function () { prefs.gTempo = Number($('gTempo').value) || 16; savePrefs(); gRechne(); });
+
+  // --- Zeichnen ---
+  // Markup aller Elemente für den Maßstab s (Pixel pro Stud); auswahl = Index mit Griffen oder -1
+  function gMarkup(els, s, auswahl, masse) {
+    var f = 12 / s, r = 7 / s, hs = 5 / s, out = '';
+    function txt(x, y, t, cls, gross) {
+      return '<text x="' + x + '" y="' + y + '" font-size="' + (gross ? f * 1.1 : f * 0.95) + '" text-anchor="middle" dominant-baseline="middle"' + (cls ? ' class="' + cls + '"' : '') + '>' + esc(t) + '</text>';
+    }
+    function griff(x, y, h) { return '<rect class="g-h" data-h="' + h + '" x="' + (x - hs) + '" y="' + (y - hs) + '" width="' + 2 * hs + '" height="' + 2 * hs + '"/>'; }
+    var reihen = { raum: [], linie: [], punkt: [] };
+    els.forEach(function (e, i) { (e.t === 'raum' ? reihen.raum : e.t === 'punkt' ? reihen.punkt : reihen.linie).push(i); });
+    reihen.raum.concat(reihen.linie, reihen.punkt).forEach(function (i) {
+      var e = els[i], sel = i === auswahl;
+      out += '<g data-i="' + i + '"' + (sel ? ' class="g-sel"' : '') + '>';
+      if (e.t === 'raum') {
+        out += '<rect class="g-raum" x="' + e.x + '" y="' + e.y + '" width="' + e.w + '" height="' + e.h + '"/>';
+        var cx = e.x + e.w / 2, cy = e.y + e.h / 2, platz = Math.min(e.w, e.h) * s > 34;
+        if (e.name && platz) out += txt(cx, cy - (masse ? f * 0.7 : 0), e.name, '', true);
+        if (masse && platz) out += txt(cx, cy + (e.name ? f * 0.7 : 0), gNum(e.w) + ' × ' + gNum(e.h), 'g-mass');
+        else if (e.name && !platz) out += txt(cx, e.y - f * 0.8, e.name);
+      } else if (gIstLinie(e)) {
+        var l = 'x1="' + e.x1 + '" y1="' + e.y1 + '" x2="' + e.x2 + '" y2="' + e.y2 + '"';
+        out += '<line class="g-hit" ' + l + '/><line class="g-' + e.t + '" ' + l + '/>';
+        if (masse && gLen(e) * s > 30) {
+          var mx = (e.x1 + e.x2) / 2, my = (e.y1 + e.y2) / 2, dx = e.x2 - e.x1, dy = e.y2 - e.y1, n = gLen(e);
+          out += txt(mx - dy / n * f, my + dx / n * f, gNum(n), 'g-mass');
+        }
+      } else if (e.t === 'punkt') {
+        var c = GFARBE[e.art] || GFARBE.Sonstiges;
+        out += '<circle cx="' + e.x + '" cy="' + e.y + '" r="' + r + '" fill="' + c + '" fill-opacity=".25" stroke="' + c + '" stroke-width="2" vector-effect="non-scaling-stroke"/>' +
+          '<text x="' + e.x + '" y="' + e.y + '" font-size="' + f * 0.85 + '" text-anchor="middle" dominant-baseline="central" style="font-weight:700;fill:' + c + ';stroke:none">' + esc((e.art || '?')[0]) + '</text>';
+        out += txt(e.x, e.y + r + f * 0.8, e.name || e.art);
+      }
+      if (sel) {
+        if (e.t === 'raum') out += griff(e.x, e.y, 'nw') + griff(e.x + e.w, e.y, 'ne') + griff(e.x, e.y + e.h, 'sw') + griff(e.x + e.w, e.y + e.h, 'se');
+        else if (gIstLinie(e)) out += griff(e.x1, e.y1, '1') + griff(e.x2, e.y2, '2');
+      }
+      out += '</g>';
+    });
+    return out;
+  }
+  function gRaster(x0, y0, x1, y1, s) {
+    var out = '', schritt1 = s >= 5 ? 1 : 0, x, y;
+    var a = Math.floor(x0), b = Math.ceil(x1), c = Math.floor(y0), d = Math.ceil(y1);
+    if (schritt1) {
+      for (x = a; x <= b; x++) if (x % 10) out += '<line class="g-grid1" x1="' + x + '" y1="' + c + '" x2="' + x + '" y2="' + d + '"/>';
+      for (y = c; y <= d; y++) if (y % 10) out += '<line class="g-grid1" x1="' + a + '" y1="' + y + '" x2="' + b + '" y2="' + y + '"/>';
+    }
+    for (x = Math.floor(a / 10) * 10; x <= b; x += 10) out += '<line class="' + (x ? 'g-grid10' : 'g-achse') + '" x1="' + x + '" y1="' + c + '" x2="' + x + '" y2="' + d + '"/>';
+    for (y = Math.floor(c / 10) * 10; y <= d; y += 10) out += '<line class="' + (y ? 'g-grid10' : 'g-achse') + '" x1="' + a + '" y1="' + y + '" x2="' + b + '" y2="' + y + '"/>';
+    return out;
+  }
+  function gGroesse() { var r = $('gSvg').getBoundingClientRect(); return { w: Math.max(1, r.width), h: Math.max(1, r.height) }; }
+  function gRender() {
+    if (!gPlan || $('gEditor').hidden) return;
+    var g = gGroesse(), w = g.w / gV.s, h = g.h / gV.s, f = 12 / gV.s;
+    var svg = $('gSvg');
+    svg.setAttribute('viewBox', gV.x + ' ' + gV.y + ' ' + w + ' ' + h);
+    var extra = '';
+    if (gDrag && gDrag.art === 'neu') {
+      var a = gDrag.a, b = gDrag.b;
+      if (gDrag.tool === 'raum') {
+        extra += '<rect class="g-neu" x="' + Math.min(a.x, b.x) + '" y="' + Math.min(a.y, b.y) + '" width="' + Math.abs(b.x - a.x) + '" height="' + Math.abs(b.y - a.y) + '"/>' +
+          '<text class="g-masstark" font-size="' + f + '" x="' + b.x + '" y="' + (b.y + f * 1.3) + '" text-anchor="middle">' + gNum(Math.abs(b.x - a.x)) + ' × ' + gNum(Math.abs(b.y - a.y)) + '</text>';
+      } else {
+        extra += '<line class="' + (gDrag.tool === 'mess' ? 'g-mess' : 'g-' + gDrag.tool) + '" x1="' + a.x + '" y1="' + a.y + '" x2="' + b.x + '" y2="' + b.y + '"/>' +
+          '<text class="g-masstark" font-size="' + f * 1.1 + '" x="' + b.x + '" y="' + (b.y - f * 1.2) + '" text-anchor="middle">' + gNum(gLen({ x1: a.x, y1: a.y, x2: b.x, y2: b.y })) + '</text>';
+      }
+    }
+    if (gMess && !(gDrag && gDrag.art === 'neu')) {
+      extra += '<line class="g-mess" x1="' + gMess.x1 + '" y1="' + gMess.y1 + '" x2="' + gMess.x2 + '" y2="' + gMess.y2 + '"/>' +
+        '<text class="g-masstark" font-size="' + f * 1.1 + '" x="' + (gMess.x1 + gMess.x2) / 2 + '" y="' + ((gMess.y1 + gMess.y2) / 2 - f) + '" text-anchor="middle">' + gNum(gLen(gMess)) + ' Studs</text>';
+    }
+    svg.innerHTML = gStyle(gV.s) + gRaster(gV.x, gV.y, gV.x + w, gV.y + h, gV.s) + gMarkup(gPlan.elemente, gV.s, gSel, $('gMasse').checked) + extra;
+    $('gInfo').textContent = gPlan.elemente.length + ' Elemente, ' + Math.round(gV.s * 10) / 10 + ' px pro Stud';
+  }
+  if (window.ResizeObserver) new ResizeObserver(function () { gRender(); }).observe($('gCanvas'));
+  $('gMasse').addEventListener('change', gRender);
+
+  function gGrenzen(els) {
+    if (!els.length) return null;
+    var b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    function p(x, y) { b.x0 = Math.min(b.x0, x); b.y0 = Math.min(b.y0, y); b.x1 = Math.max(b.x1, x); b.y1 = Math.max(b.y1, y); }
+    els.forEach(function (e) {
+      if (e.t === 'raum') { p(e.x, e.y); p(e.x + e.w, e.y + e.h); }
+      else if (gIstLinie(e)) { p(e.x1, e.y1); p(e.x2, e.y2); }
+      else p(e.x, e.y);
+    });
+    return b;
+  }
+  function gFit() {
+    var g = gGroesse(), b = gGrenzen(gPlan ? gPlan.elemente : []);
+    if (!b) { gV = { s: 14, x: -3, y: -3 }; gRender(); return; }
+    var w = Math.max(10, b.x1 - b.x0) + 8, h = Math.max(10, b.y1 - b.y0) + 8;
+    gV.s = Math.max(2, Math.min(60, Math.min(g.w / w, g.h / h)));
+    gV.x = (b.x0 + b.x1) / 2 - g.w / gV.s / 2; gV.y = (b.y0 + b.y1) / 2 - g.h / gV.s / 2;
+    gRender();
+  }
+  function gZoom(faktor, px, py) {
+    var g = gGroesse();
+    if (px == null) { px = g.w / 2; py = g.h / 2; }
+    var sx = gV.x + px / gV.s, sy = gV.y + py / gV.s;
+    gV.s = Math.max(2, Math.min(80, gV.s * faktor));
+    gV.x = sx - px / gV.s; gV.y = sy - py / gV.s;
+    gRender();
+  }
+  $('gZoomIn').addEventListener('click', function () { gZoom(1.3); });
+  $('gZoomOut').addEventListener('click', function () { gZoom(1 / 1.3); });
+  $('gFit').addEventListener('click', gFit);
+  $('gUndoBtn').addEventListener('click', gRueckgaengig);
+  $('gSvg').addEventListener('wheel', function (ev) {
+    ev.preventDefault();
+    var r = $('gSvg').getBoundingClientRect();
+    gZoom(ev.deltaY < 0 ? 1.15 : 1 / 1.15, ev.clientX - r.left, ev.clientY - r.top);
+  }, { passive: false });
+
+  function gWerkzeug(t) {
+    gTool = t; gMess = null;
+    document.querySelectorAll('.tool-btn').forEach(function (b) { b.classList.toggle('active', b.dataset.tool === t); });
+    $('gCanvas').classList.toggle('tool-sel', t === 'sel');
+    gRender();
+  }
+  document.querySelectorAll('.tool-btn').forEach(function (b) { b.addEventListener('click', function () { gWerkzeug(b.dataset.tool); }); });
+  gWerkzeug('sel');
+
+  // Maus und Finger
+  function gPunkt(ev) {
+    var r = $('gSvg').getBoundingClientRect();
+    return { x: gV.x + (ev.clientX - r.left) / gV.s, y: gV.y + (ev.clientY - r.top) / gV.s };
+  }
+  function gSnapP(p) { return { x: gSnapN(p.x), y: gSnapN(p.y) }; }
+  var gZeiger = {};
+  $('gSvg').addEventListener('pointerdown', function (ev) {
+    if (!gPlan) return;
+    gZeiger[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
+    // Zwei Finger: Zoomen und Verschieben statt Zeichnen
+    var ids = Object.keys(gZeiger);
+    if (ids.length === 2) {
+      if (gDrag && gDrag.undo && !gDrag.bewegt) gUndo.pop();
+      var p1 = gZeiger[ids[0]], p2 = gZeiger[ids[1]];
+      gDrag = { art: 'pinch', d: Math.hypot(p1.x - p2.x, p1.y - p2.y), s: gV.s };
+      gRender(); return;
+    }
+    if (ids.length > 2) return;
+    if (ev.pointerType === 'mouse' && ev.button !== 0 && ev.button !== 1) return;
+    $('gSvg').setPointerCapture(ev.pointerId);
+    var p = gPunkt(ev), sp = gSnapP(p);
+    var hEl = ev.target.closest('[data-h]'), eEl = ev.target.closest('[data-i]');
+    if (ev.button === 1 || gTool === 'sel' && !hEl && !eEl) {
+      if (gTool === 'sel') { gSel = -1; gProps(); }
+      gDrag = { art: 'pan', cx: ev.clientX, cy: ev.clientY, vx: gV.x, vy: gV.y };
+      $('gCanvas').classList.add('panning');
+    } else if (gTool === 'sel' && hEl && gSel >= 0) {
+      gMerke(); gDrag = { art: 'griff', h: hEl.dataset.h, orig: gClone(gPlan.elemente[gSel]), undo: true };
+    } else if (gTool === 'sel') {
+      gSel = Number(eEl.dataset.i); gMerke();
+      gDrag = { art: 'move', start: sp, orig: gClone(gPlan.elemente[gSel]), undo: true };
+      gProps();
+    } else if (gTool === 'punkt') {
+      gMerke();
+      gPlan.elemente.push({ t: 'punkt', x: sp.x, y: sp.y, art: gLetzteArt, name: '' });
+      gSel = gPlan.elemente.length - 1; gAenderung(); gProps();
+      var nf = $('gpName'); if (nf && ev.pointerType === 'mouse') setTimeout(function () { nf.focus(); }, 0);
+    } else {
+      gMess = null;
+      gDrag = { art: 'neu', tool: gTool, a: sp, b: sp };
+    }
+    gRender();
+  });
+  $('gSvg').addEventListener('pointermove', function (ev) {
+    if (gZeiger[ev.pointerId]) gZeiger[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
+    var p = gPunkt(ev), sp = gSnapP(p);
+    $('gPos').textContent = 'X ' + gNum(sp.x) + '  Y ' + gNum(sp.y) + '  (Studs)';
+    if (!gDrag) return;
+    if (gDrag.art === 'pinch') {
+      var ids = Object.keys(gZeiger); if (ids.length < 2) return;
+      var p1 = gZeiger[ids[0]], p2 = gZeiger[ids[1]], r = $('gSvg').getBoundingClientRect();
+      var d = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+      gZoom((gDrag.s * d / gDrag.d) / gV.s, (p1.x + p2.x) / 2 - r.left, (p1.y + p2.y) / 2 - r.top);
+      return;
+    }
+    if (gDrag.art === 'pan') {
+      gV.x = gDrag.vx - (ev.clientX - gDrag.cx) / gV.s; gV.y = gDrag.vy - (ev.clientY - gDrag.cy) / gV.s;
+    } else if (gDrag.art === 'move') {
+      var dx = sp.x - gDrag.start.x, dy = sp.y - gDrag.start.y, o = gDrag.orig, e = gPlan.elemente[gSel];
+      if (dx || dy) gDrag.bewegt = true;
+      if (e.t === 'raum' || e.t === 'punkt') { e.x = o.x + dx; e.y = o.y + dy; }
+      else { e.x1 = o.x1 + dx; e.y1 = o.y1 + dy; e.x2 = o.x2 + dx; e.y2 = o.y2 + dy; }
+      if (gDrag.bewegt) gAenderung();
+    } else if (gDrag.art === 'griff') {
+      var el = gPlan.elemente[gSel], og = gDrag.orig;
+      gDrag.bewegt = true;
+      if (el.t === 'raum') {
+        var fx = gDrag.h.indexOf('w') !== -1 ? og.x + og.w : og.x, fy = gDrag.h.indexOf('n') !== -1 ? og.y + og.h : og.y;
+        el.x = Math.min(fx, sp.x); el.y = Math.min(fy, sp.y);
+        el.w = Math.max(gSnapV(), Math.abs(sp.x - fx)); el.h = Math.max(gSnapV(), Math.abs(sp.y - fy));
+      } else if (gDrag.h === '1') { el.x1 = sp.x; el.y1 = sp.y; } else { el.x2 = sp.x; el.y2 = sp.y; }
+      gAenderung();
+    } else if (gDrag.art === 'neu') {
+      var b = { x: sp.x, y: sp.y };
+      // Wände gerade halten; Umschalt erlaubt schräge Linien
+      if (gDrag.tool !== 'raum' && !ev.shiftKey) {
+        if (Math.abs(b.x - gDrag.a.x) >= Math.abs(b.y - gDrag.a.y)) b.y = gDrag.a.y; else b.x = gDrag.a.x;
+      }
+      gDrag.b = b;
+    }
+    gRender();
+    if (gDrag.art === 'move' || gDrag.art === 'griff') gPropsWerte();
+  });
+  function gLoslassen(ev) {
+    delete gZeiger[ev.pointerId];
+    if (!gDrag) return;
+    if (gDrag.art === 'pinch') { if (!Object.keys(gZeiger).length) gDrag = null; return; }
+    var d = gDrag; gDrag = null;
+    $('gCanvas').classList.remove('panning');
+    if (d.undo && !d.bewegt) gUndo.pop();
+    if (d.art === 'neu') {
+      var a = d.a, b = d.b;
+      if (d.tool === 'mess') { if (a.x !== b.x || a.y !== b.y) gMess = { x1: a.x, y1: a.y, x2: b.x, y2: b.y }; }
+      else if (d.tool === 'raum') {
+        if (a.x !== b.x && a.y !== b.y) {
+          gMerke();
+          gPlan.elemente.push({ t: 'raum', x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y), name: '' });
+          gSel = gPlan.elemente.length - 1; gAenderung();
+        }
+      } else if (a.x !== b.x || a.y !== b.y) {
+        gMerke();
+        gPlan.elemente.push({ t: d.tool, x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+        gSel = gPlan.elemente.length - 1; gAenderung();
+      }
+      gProps();
+    }
+    gRender();
+  }
+  $('gSvg').addEventListener('pointerup', gLoslassen);
+  $('gSvg').addEventListener('pointercancel', gLoslassen);
+  $('gSvg').addEventListener('pointerleave', function () { $('gPos').textContent = 'Maße in Studs'; });
+
+  // Tastatur: nur in der Ansicht Grundrisse und nicht beim Tippen
+  document.addEventListener('keydown', function (ev) {
+    if (view !== 'plan' || !gPlan || $('gEditor').hidden) return;
+    var tippt = /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName);
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') { ev.preventDefault(); gSpeichern(); return; }
+    if (tippt) return;
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') { ev.preventDefault(); gRueckgaengig(); return; }
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    if ((ev.key === 'Delete' || ev.key === 'Backspace') && gSel >= 0) { ev.preventDefault(); gLoeschen(); return; }
+    if (ev.key === 'Escape') { gSel = -1; gMess = null; gProps(); gRender(); return; }
+    var t = { v: 'sel', r: 'raum', w: 'wand', t: 'tuer', f: 'fenster', m: 'punkt', l: 'mess' }[ev.key.toLowerCase()];
+    if (t) gWerkzeug(t);
+  });
+  function gLoeschen() {
+    if (gSel < 0) return;
+    gMerke(); gPlan.elemente.splice(gSel, 1); gSel = -1; gAenderung(); gProps(); gRender();
+  }
+
+  // Eigenschaften des ausgewählten Elements: Zahlen direkt eintippen
+  function gFeld(id, label, wert, extra) {
+    return '<label class="field' + (extra || '') + '">' + label + '<input id="' + id + '" type="number" step="0.5" inputmode="decimal" value="' + (Math.round(wert * 10) / 10) + '"></label>';
+  }
+  function gProps() {
+    var e = gPlan && gSel >= 0 ? gPlan.elemente[gSel] : null, h = '';
+    if (!e) {
+      h = '<p class="hint">Werkzeug wählen und im Plan ziehen. Ausgewähltes Element: Maße unten eintippen, mit Entf löschen. Ansicht verschieben: mit „Auswählen“ auf freie Fläche ziehen; zoomen mit Mausrad oder zwei Fingern. Tastenkürzel: V, R, W, T, F, M, L, Strg+Z, Strg+S.</p>';
+    } else {
+      h = '<strong class="small">' + G_NAMEN[e.t] + '</strong>';
+      if (e.t === 'raum') {
+        h += '<label class="field wide">Name<input id="gpName" type="text" maxlength="60" value="' + esc(e.name || '') + '" placeholder="z. B. Schalterhalle"></label>' +
+          gFeld('gpX', 'X', e.x) + gFeld('gpY', 'Y', e.y) + gFeld('gpW', 'Breite', e.w) + gFeld('gpH', 'Tiefe', e.h);
+      } else if (gIstLinie(e)) {
+        h += '<label class="field">Art<select id="gpArt">' + ['wand', 'tuer', 'fenster'].map(function (t) {
+          return '<option value="' + t + '"' + (t === e.t ? ' selected' : '') + '>' + G_NAMEN[t] + '</option>';
+        }).join('') + '</select></label>' +
+          gFeld('gpX1', 'X Start', e.x1) + gFeld('gpY1', 'Y Start', e.y1) + gFeld('gpX2', 'X Ende', e.x2) + gFeld('gpY2', 'Y Ende', e.y2) + gFeld('gpL', 'Länge', gLen(e));
+      } else {
+        h += '<label class="field">Art<select id="gpArt">' + gArten.map(function (a) {
+          return '<option' + (a === e.art ? ' selected' : '') + '>' + esc(a) + '</option>';
+        }).join('') + '</select></label>' +
+          '<label class="field wide">Beschriftung<input id="gpName" type="text" maxlength="60" value="' + esc(e.name || '') + '" placeholder="z. B. Haupttresor"></label>' +
+          gFeld('gpX', 'X', e.x) + gFeld('gpY', 'Y', e.y);
+      }
+      h += '<button type="button" id="gpDup" class="btn-ghost">Kopieren</button><button type="button" id="gpDel" class="btn-ghost btn-danger">Entfernen</button>';
+    }
+    $('gProps').innerHTML = h;
+  }
+  // Nur die Zahlen auffrischen (beim Ziehen), ohne das Feld mit dem Fokus zu überschreiben
+  function gPropsWerte() {
+    var e = gSel >= 0 ? gPlan.elemente[gSel] : null; if (!e) return;
+    var w = e.t === 'raum' ? { gpX: e.x, gpY: e.y, gpW: e.w, gpH: e.h } : gIstLinie(e) ? { gpX1: e.x1, gpY1: e.y1, gpX2: e.x2, gpY2: e.y2, gpL: gLen(e) } : { gpX: e.x, gpY: e.y };
+    Object.keys(w).forEach(function (k) { var f = $(k); if (f && f !== document.activeElement) f.value = Math.round(w[k] * 10) / 10; });
+  }
+  var gPropMerk = false;
+  $('gProps').addEventListener('focusin', function () { gPropMerk = false; });
+  $('gProps').addEventListener('input', function (ev) {
+    var e = gSel >= 0 ? gPlan.elemente[gSel] : null, id = ev.target.id; if (!e) return;
+    if (!gPropMerk) { gMerke(); gPropMerk = true; }
+    var raw = ev.target.value, n = Number(String(raw).replace(',', '.'));
+    if (id === 'gpName') e.name = raw.slice(0, 60);
+    else if (id === 'gpArt') { if (gIstLinie(e)) e.t = raw; else { e.art = raw; gLetzteArt = raw; } }
+    else if (raw === '' || !isFinite(n)) return;
+    else if (id === 'gpX') e.x = n; else if (id === 'gpY') e.y = n;
+    else if (id === 'gpW') { if (n > 0) e.w = n; } else if (id === 'gpH') { if (n > 0) e.h = n; }
+    else if (id === 'gpX1') e.x1 = n; else if (id === 'gpY1') e.y1 = n; else if (id === 'gpX2') e.x2 = n; else if (id === 'gpY2') e.y2 = n;
+    else if (id === 'gpL' && n > 0) {
+      // Länge ändern: Startpunkt bleibt, Richtung bleibt
+      var l = gLen(e);
+      if (l > 0) { e.x2 = Math.round((e.x1 + (e.x2 - e.x1) / l * n) * 10) / 10; e.y2 = Math.round((e.y1 + (e.y2 - e.y1) / l * n) * 10) / 10; }
+    }
+    gAenderung(); gRender();
+    if (id !== 'gpL') { var lf = $('gpL'); if (lf && gIstLinie(e)) lf.value = Math.round(gLen(e) * 10) / 10; }
+    else ['gpX2', 'gpY2'].forEach(function (k) { $(k).value = k === 'gpX2' ? e.x2 : e.y2; });
+  });
+  $('gProps').addEventListener('click', function (ev) {
+    if (ev.target.id === 'gpDel') gLoeschen();
+    if (ev.target.id === 'gpDup' && gSel >= 0) {
+      gMerke();
+      var c = gClone(gPlan.elemente[gSel]), v = gSnapV() * 2;
+      if (gIstLinie(c)) { c.x1 += v; c.y1 += v; c.x2 += v; c.y2 += v; } else { c.x += v; c.y += v; }
+      gPlan.elemente.push(c); gSel = gPlan.elemente.length - 1; gAenderung(); gProps(); gRender();
+    }
+  });
+
+  // Als PNG speichern (zum Teilen, z. B. auf Discord)
+  $('gPng').addEventListener('click', function () {
+    var b = gGrenzen(gPlan.elemente);
+    if (!b) { $('gMsg').textContent = 'Der Plan ist noch leer.'; return; }
+    var rand = 4, x0 = b.x0 - rand, y0 = b.y0 - rand - 3, w = b.x1 - b.x0 + 2 * rand, h = b.y1 - b.y0 + 2 * rand + 3;
+    var s = Math.max(4, Math.min(24, 3000 / Math.max(w, h)));
+    var W = Math.round(w * s), H = Math.round(h * s), name = $('gName').value || 'Grundriss';
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="' + x0 + ' ' + y0 + ' ' + w + ' ' + h + '">' + gStyle(s) +
+      '<rect x="' + x0 + '" y="' + y0 + '" width="' + w + '" height="' + h + '" fill="#0A101C"/>' + gRaster(x0, y0, x0 + w, y0 + h, s) +
+      gMarkup(gPlan.elemente, s, -1, $('gMasse').checked) +
+      '<text x="' + (x0 + 12 / s) + '" y="' + (y0 + 20 / s) + '" font-size="' + 16 / s + '" style="font-weight:600">' + esc(name) + '</text>' +
+      '<text class="g-mass" x="' + (x0 + 12 / s) + '" y="' + (y0 + 38 / s) + '" font-size="' + 11 / s + '">Maße in Studs, Raster 1 Stud, dicke Linien alle 10 Studs</text></svg>';
+    var img = new Image();
+    img.onload = function () {
+      var c = document.createElement('canvas'); c.width = W; c.height = H;
+      c.getContext('2d').drawImage(img, 0, 0);
+      c.toBlob(function (blob) {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = name.replace(/[\\/:*?"<>|]+/g, '_') + '.png';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+      }, 'image/png');
+    };
+    img.onerror = function () { $('gMsg').textContent = 'Bild konnte nicht erstellt werden.'; };
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
   });
 
   // ---------- Rechte ----------

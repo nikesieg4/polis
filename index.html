@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 34 38'%3E%3Cpath d='M17 1.5 31.5 7v11c0 9.2-6.1 15.8-14.5 18.5C8.6 33.8 2.5 27.2 2.5 18V7L17 1.5Z' fill='%230B1220' stroke='%234C8DFF' stroke-width='2.4'/%3E%3Cpath d='m17 10 2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.6-4.8 2.6.9-5.4-3.9-3.8 5.4-.8L17 10Z' fill='%234C8DFF'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css?v=63">
+<link rel="stylesheet" href="style.css?v=64">
 </head>
 <body>
 <header class="topbar">
@@ -24,6 +24,7 @@
     <button type="button" class="nav-btn active" data-view="db">Datenbank</button>
     <button type="button" class="nav-btn" data-view="schicht" id="navSchicht">Schicht</button>
     <button type="button" class="nav-btn" data-view="beamte" id="navBeamte">Polizei-Register</button>
+    <button type="button" class="nav-btn" data-view="plan" id="navPlan">Grundrisse</button>
     <button type="button" class="nav-btn" data-view="rechte" id="navRechte">Rechte</button>
   </nav>
   <div class="officer">
@@ -277,6 +278,70 @@
 </div>
 </div>
 
+<div id="viewPlan" class="view" hidden>
+<div class="layout plan-layout">
+  <aside class="col plan-side">
+    <section class="card">
+      <h1>Grundrisse</h1>
+      <form id="gNewForm" class="create-row">
+        <label class="field"><span class="sr">Name des neuen Grundrisses</span><input id="gNewName" type="text" maxlength="80" placeholder="z. B. Bank – Erdgeschoss" autocomplete="off"></label>
+        <button type="submit" class="btn btn-primary btn-sm">Anlegen</button>
+      </form>
+      <div id="gList" class="results plan-list"></div>
+    </section>
+    <section class="card">
+      <h2>Lauf-Rechner</h2>
+      <p class="hint">Gerade laufen, nicht sprinten, mit Aufnahme. Sekunden aus dem Video eintragen. Standard in Roblox: 16 Studs pro Sekunde.</p>
+      <div class="create-row">
+        <label class="field plan-num">Sekunden<input id="gSek" type="number" min="0" step="0.05" inputmode="decimal"></label>
+        <label class="field plan-num">Studs pro Sekunde<input id="gTempo" type="number" min="1" step="0.1" inputmode="decimal"></label>
+      </div>
+      <strong id="gErgebnis" class="plan-ergebnis mono">= 0 Studs</strong>
+    </section>
+  </aside>
+  <main class="col plan-main">
+    <section id="gEmpty" class="card"><div class="placeholder">Wähle links einen Grundriss aus oder lege einen neuen an.</div></section>
+    <section id="gEditor" class="card" hidden>
+      <div class="row-between">
+        <label class="field plan-name"><span class="sr">Name des Grundrisses</span><input id="gName" type="text" maxlength="80" autocomplete="off"></label>
+        <div class="plan-actions">
+          <span id="gMsg" class="muted small" role="status"></span>
+          <button type="button" id="gPng" class="btn-ghost">Als Bild</button>
+          <button type="button" id="gDel" class="btn-ghost btn-danger">Löschen</button>
+          <button type="button" id="gSave" class="btn btn-primary btn-sm">Speichern</button>
+        </div>
+      </div>
+      <div class="plan-tools" role="toolbar" aria-label="Werkzeuge">
+        <button type="button" class="tool-btn" data-tool="sel" title="Auswählen, verschieben, Ansicht ziehen (V)">Auswählen</button>
+        <button type="button" class="tool-btn" data-tool="raum" title="Raum aufziehen (R)">Raum</button>
+        <button type="button" class="tool-btn" data-tool="wand" title="Wand ziehen, Umschalt für schräg (W)">Wand</button>
+        <button type="button" class="tool-btn" data-tool="tuer" title="Tür ziehen (T)">Tür</button>
+        <button type="button" class="tool-btn" data-tool="fenster" title="Fenster ziehen (F)">Fenster</button>
+        <button type="button" class="tool-btn" data-tool="punkt" title="Markierung setzen, z. B. Tresor oder Kamera (M)">Markierung</button>
+        <button type="button" class="tool-btn" data-tool="mess" title="Abstand messen, wird nicht gespeichert (L)">Messen</button>
+        <span class="plan-sep"></span>
+        <label class="plan-snap">Raster
+          <select id="gSnap" class="field-select"><option value="0.5">0,5</option><option value="1" selected>1</option><option value="2">2</option><option value="4">4</option></select>
+        </label>
+        <label class="plan-check"><input id="gMasse" type="checkbox" checked> Maße</label>
+      </div>
+      <div id="gCanvas" class="plan-canvas tool-sel">
+        <svg id="gSvg" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Grundriss"></svg>
+        <div class="plan-zoom">
+          <button type="button" id="gZoomIn" class="btn-ghost" aria-label="Vergrößern">+</button>
+          <button type="button" id="gZoomOut" class="btn-ghost" aria-label="Verkleinern">−</button>
+          <button type="button" id="gFit" class="btn-ghost">Einpassen</button>
+          <button type="button" id="gUndoBtn" class="btn-ghost" title="Rückgängig (Strg+Z)">Rückgängig</button>
+        </div>
+      </div>
+      <div class="row-between"><span id="gPos" class="muted small mono">Maße in Studs</span><span id="gInfo" class="muted small"></span></div>
+      <div id="gProps" class="plan-props"></div>
+      <label class="field">Notizen<textarea id="gNotizen" rows="3" maxlength="2000" placeholder="z. B. Tresor nur über Keller erreichbar, Kamera über dem Eingang"></textarea></label>
+    </section>
+  </main>
+</div>
+</div>
+
 <div id="viewRechte" class="view" hidden>
 <div class="layout">
   <section class="card rechte-card">
@@ -331,6 +396,6 @@
   </form>
 </div>
 
-<script src="app.js?v=63"></script>
+<script src="app.js?v=64"></script>
 </body>
 </html>

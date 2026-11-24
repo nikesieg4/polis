@@ -14,6 +14,7 @@ import { SCHICHT_SCHEMA, SCHICHT_MIGRATIONS, handleSchicht } from '../../lib/sch
 import { einheitFuer } from '../../lib/rollen.js';
 import { KATALOG, KATALOG_BY_NR, label, katalogFuer } from '../../lib/katalog.js';
 import { REGISTER_SCHEMA, handleRegister } from '../../lib/register.js';
+import { GRUNDRISS_SCHEMA, handleGrundrisse } from '../../lib/grundriss.js';
 
 const STATUSES = ['Sauber', 'Bewährung', 'Fahndung'];
 
@@ -73,6 +74,7 @@ const SCHEMA = [
   ...RECHTE_SCHEMA,
   ...SCHICHT_SCHEMA,
   ...REGISTER_SCHEMA,
+  ...GRUNDRISS_SCHEMA,
   `CREATE TABLE IF NOT EXISTS gruppen (
      name TEXT PRIMARY KEY COLLATE NOCASE,
      beschreibung TEXT,
@@ -304,7 +306,7 @@ export async function onRequest(context) {
     if (!keyMatches(request.headers.get('x-polis-key'), env.POLIS_KEY)) return fail(401, 'Falscher Dienstschlüssel.');
     const keyAdmin = keyMatches(request.headers.get('x-polis-admin'), env.POLIS_KEY_ADMIN);
     // Ohne Discord gibt es keine Rollen: alles außer Admin-Funktionen; Admin-Passwort schaltet Management und Admin frei
-    perms = new Set(PERM_KEYS.filter((k) => k !== 'rechte' && (keyAdmin || !['admin', 'schicht_alle', 'quote'].includes(k))));
+    perms = new Set(PERM_KEYS.filter((k) => k !== 'rechte' && (keyAdmin || !['admin', 'schicht_alle', 'quote', 'grundrisse'].includes(k))));
     if (route === 'auth') return json({ ok: true });
     const dec = (h) => { try { return clean(decodeURIComponent(request.headers.get(h) || ''), 60); } catch { return ''; } };
     officer = { name: dec('x-polis-name'), nr: dec('x-polis-nr').slice(0, 20) };
@@ -401,6 +403,10 @@ export async function onRequest(context) {
   }
   if (parts[0] === 'beamte') {
     const r = await handleRegister(ctx);
+    if (r) return r;
+  }
+  if (parts[0] === 'grundrisse') {
+    const r = await handleGrundrisse(ctx);
     if (r) return r;
   }
   if (parts[0] === 'rechte') {
