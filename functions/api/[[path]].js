@@ -291,7 +291,7 @@ export async function onRequest(context) {
     if (method !== 'GET' && request.headers.get('x-polis') !== '1') return fail(403, 'Ungültige Anfrage.');
     officer = { name: auth.member.name || auth.member.username, nr: '@' + auth.member.username };
     uid = auth.member.uid;
-    einheit = einheitFuer(auth.member.roles, roleList);
+    einheit = einheitFuer(auth.member.roles, roleList).einheit;
     if (route === 'me') {
       return json({ name: officer.name, username: auth.member.username, avatar: auth.member.avatar,
         admin: perms.has('admin'), perms: [...perms], rang: auth.member.rang || 0 });
@@ -380,7 +380,19 @@ export async function onRequest(context) {
   }
 
   // ---------- Schichtzeit, Polizei-Register, Rechte ----------
-  const ctx = { request, method, parts, db, can, uid, officer, beamter, json, fail, readBody, logIt, clean, einheit, url: new URL(request.url) };
+  // Einheit eines anderen Beamten aus seinen zuletzt gesehenen Discord-Rollen (für „Im Dienst“)
+  const einheitVon = async (uids) => {
+    const out = {};
+    if (!discordConfigured(env) || !uids.length) return out;
+    if (!roleList.length) { try { roleList = await guildRoleList(env); } catch { return out; } }
+    const { results } = await db.prepare('SELECT uid, roles FROM discord_members WHERE uid IN (' + uids.map(() => '?').join(',') + ')').bind(...uids).all();
+    for (const r of results) {
+      let roles = []; try { roles = JSON.parse(r.roles || '[]'); } catch { /* leer */ }
+      out[r.uid] = einheitFuer(roles, roleList);
+    }
+    return out;
+  };
+  const ctx = { request, method, parts, db, can, uid, officer, beamter, json, fail, readBody, logIt, clean, einheit, einheitVon, url: new URL(request.url) };
   if (parts[0] === 'schicht') {
     const r = await handleSchicht(ctx);
     if (r) return r;

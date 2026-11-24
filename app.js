@@ -1400,7 +1400,8 @@
       $('dienstList').innerHTML = list.length ? list.map(function (x) {
         var t = x.dauerMs + (x.status === 'aktiv' ? Date.now() - dOffset : 0);
         return '<div class="dienst-row' + (x.ich ? ' ich' : '') + '">' +
-          '<span class="einheit einheit-' + (x.einheit === 'SEK' ? 'sek' : 'polizei') + '">' + esc(x.einheit) + '</span>' +
+          '<span class="einheit einheit-' + (x.einheit === 'SEK' ? 'sek' : 'polizei') + '"' +
+            (x.grund != null ? ' title="' + esc('Bestimmt durch: ' + (x.grund || 'keine passende Rolle')) + '"' : '') + '>' + esc(x.einheit) + '</span>' +
           '<span class="person-main"><strong>' + esc(x.name) + (x.ich ? ' <span class="muted">(du)</span>' : '') + '</strong>' +
           '<span>seit ' + hhmmTs(x.start) + ' Uhr</span></span>' +
           (x.status === 'pause' ? '<span class="chip chip-amber">Pause</span>' : '<span class="chip chip-green">Im Dienst</span>') +
