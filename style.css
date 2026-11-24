@@ -458,3 +458,25 @@ body.no-officer #hbNewBtn { opacity: 0.45; cursor: not-allowed; }
 /* Reiter am Handy umbrechen statt die Seite zu verbreitern */
 .tabs { flex-wrap: wrap; }
 @media (max-width: 640px) { .tab { padding: 0 10px; font-size: 14px; } }
+
+/* Bearbeitungsmodus-Knopf */
+.edit-toggle {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; border-radius: 6px;
+  border: 1px solid #4A3A7A; background: transparent; color: #C9B5FF; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.edit-toggle:hover { background: #2D1F4A; }
+.edit-toggle.on { background: #2D1F4A; border-color: #9B7BFF; color: #EDE5FF; }
+@media (max-width: 640px) { .edit-toggle span { display: none; } .record-head { flex-wrap: wrap; } }
+
+/* Strafregister ausklappen */
+.ausklappen {
+  margin-top: 4px; min-height: 40px; border-radius: 6px; border: 1px dashed var(--field); background: transparent;
+  color: #8FB4FF; font-size: 13px; font-weight: 600; cursor: pointer; width: 100%;
+}
+.ausklappen:hover { background: var(--inset); }
+
+/* Personensuche reicht bis zur Unterkante der rechten Spalte */
+#viewDb .layout { align-items: stretch; }
+#viewDb .col-search > .card { flex: 1 1 auto; min-height: 0; }
+#viewDb .col-search .results { flex: 1 1 0; min-height: 260px; max-height: none; contain: size; overflow-y: auto; }
+@media (max-width: 900px) { #viewDb .col-search .results { flex: none; height: 60vh; } }

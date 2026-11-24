@@ -360,7 +360,10 @@
   var store = LocalStore;
   var people = [];
   var akten = {};          // id -> Array (geladen) | undefined
-  var ui = { edit: null, q: '', sq: '', selId: null, msg: '', busy: false, error: '', createError: '', loading: true, tab: 'personen', hbMsg: '' };
+  var editMode = false;
+  try { editMode = localStorage.getItem('polis.editMode') === '1'; } catch (e) { /* ignorieren */ }
+  function kannBearbeiten() { return isAdmin || has('kripo_setzen'); }
+  var ui = { akteAlle: false, edit: null, q: '', sq: '', selId: null, msg: '', busy: false, error: '', createError: '', loading: true, tab: 'personen', hbMsg: '' };
   var hbOpenList = [];   // alle offenen Haftbefehle
   var logList = null;    // Protokoll (null = noch nicht geladen)
   var gruppenList = null; // Gruppierungen (null = noch nicht geladen)
@@ -523,7 +526,7 @@
   function renderAdmin() {
     var p = findPerson(ui.selId);
     var box = $('adminBox');
-    box.hidden = !(isAdmin && p);
+    box.hidden = !(isAdmin && p && editMode);
     $('adminBadge').hidden = !isAdmin;
     $('adminBtn').hidden = !(mode === 'server' && adminAvailable && authMode !== 'discord');
     $('adminBtn').textContent = isAdmin ? 'Admin beenden' : 'Admin';
@@ -536,7 +539,7 @@
   function renderKripo() {
     var p = findPerson(ui.selId);
     var box = $('kripoBox');
-    box.hidden = !p || !has('kripo_setzen');
+    box.hidden = !p || !has('kripo_setzen') || !editMode;
     if (box.hidden) { box.dataset.pid = ''; return; }
     if (box.dataset.pid !== p.id) {
       box.dataset.pid = p.id;
@@ -661,7 +664,10 @@
           '<div class="record-head"><span class="avatar">' + avatarHtml(p) + '</span>' +
             '<div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:0"><h2>' + esc(p.name) + '</h2>' +
             '<span class="muted small mono">@' + esc(p.roblox) + '  ' + esc(p.id) + '</span></div>' +
-            '<span class="chip ' + chipClass(statusVon(p)) + '">' + esc(statusVon(p)) + '</span></div>' +
+            '<span class="chip ' + chipClass(statusVon(p)) + '">' + esc(statusVon(p)) + '</span>' +
+            (kannBearbeiten() ? '<button type="button" class="edit-toggle' + (editMode ? ' on' : '') + '" data-action="edit-mode" aria-pressed="' + editMode + '" title="Bearbeiten und Kripo-Markierung ein- oder ausblenden">' +
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>' +
+              '<span>Bearbeitungsmodus</span></button>' : '') + '</div>' +
           '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">' +
             (offeneStrafen(p) > 0
               ? '<span class="small auto-fahndung">Fahndung automatisch wegen ausstehender Strafen</span>'
@@ -677,8 +683,11 @@
         '</div>' +
       '</section>';
 
-    hist.innerHTML = '<section class="card"><h2>Strafregister</h2><div class="entries">' +
-      (!loaded ? '<span class="empty-note">Wird geladen</span>' : akte.length ? akte.map(function (e) {
+    var GEZEIGT = 3;
+    var sichtbar = ui.akteAlle ? akte : akte.slice(0, GEZEIGT);
+    hist.innerHTML = '<section class="card"><div class="row-between"><h2>Strafregister</h2>' +
+      (loaded && akte.length ? '<span class="muted small">' + akte.length + (akte.length === 1 ? ' Eintrag' : ' Einträge') + '</span>' : '') + '</div><div class="entries">' +
+      (!loaded ? '<span class="empty-note">Wird geladen</span>' : akte.length ? sichtbar.map(function (e) {
         return '<div class="entry' + (e.erledigt ? ' done' : ' open') + '"><div class="entry-top"><strong>' + esc(e.delikt) + '</strong><span>' + esc(e.created_at ? dateTime(e.created_at) : e.datum) + '</span></div>' +
           '<span class="strafe">' + esc(strafeText(e)) + '</span>' +
           '<div class="entry-foot"><span class="by">Beamter ' + esc(e.beamter || 'Unbekannt') + '</span>' +
@@ -691,7 +700,10 @@
               '<button type="button" class="mini mini-danger" data-action="remove" data-eid="' + e.id + '">Entfernen</button></span>') +
           '</div>' + adjustForm(e) + '</div>';
       }).join('') : '<span class="empty-note">Keine Einträge.</span>') +
-      '</div></section>';
+      '</div>' +
+      (loaded && akte.length > GEZEIGT ? '<button type="button" class="ausklappen" data-action="akte-alle" aria-expanded="' + !!ui.akteAlle + '">' +
+        (ui.akteAlle ? 'Weniger anzeigen' : 'Alle ' + akte.length + ' Einträge anzeigen') + '</button>' : '') +
+      '</section>';
     renderStrafen();
     renderHb();
   }
@@ -967,7 +979,15 @@
     if (!el) return;
     var a = el.dataset.action;
 
+    if (a === 'edit-mode') {
+      editMode = !editMode;
+      try { localStorage.setItem('polis.editMode', editMode ? '1' : '0'); } catch (e) { /* ignorieren */ }
+      renderRecord();
+      return;
+    }
+    if (a === 'akte-alle') { ui.akteAlle = !ui.akteAlle; renderRecord(); return; }
     if (a === 'select') {
+      if (ui.selId !== el.dataset.id) ui.akteAlle = false;
       ui.view = 'person';
       if (ui.selId !== el.dataset.id) closeHbForm();
       ui.edit = null;
@@ -1103,6 +1123,7 @@
     }
   });
   function selectPerson(id) {
+    if (ui.selId !== id) ui.akteAlle = false;
     ui.view = 'person'; ui.tab = 'personen'; ui.edit = null;
     if (ui.selId !== id) closeHbForm();
     ui.selId = id; ui.msg = ''; ui.error = ''; ui.hbMsg = '';
