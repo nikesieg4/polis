@@ -910,6 +910,7 @@
   });
   function renderMe() {
     var d = authMode === 'discord';
+    applyBg();
     $('meBox').hidden = !(d && me);
     document.querySelectorAll('.officer-field').forEach(function (f) { f.hidden = d; });
     if (d && me) {
@@ -918,6 +919,56 @@
       if (me.avatar) $('meAvatar').src = me.avatar;
     }
   }
+  // ---------- Einstellungen: Hintergrund (pro Person, nur in diesem Browser) ----------
+  var HINTERGRUENDE = [
+    { id: '', name: 'Standard', info: 'Einfarbig, ohne Muster' },
+    { id: 'gitter', name: 'Lageraster', info: 'Feines Gitter' },
+    { id: 'punkte', name: 'Punktraster', info: 'Ruhige Punkte' },
+    { id: 'schraffur', name: 'Schraffur', info: 'Diagonale Linien' },
+    { id: 'scan', name: 'Monitor', info: 'Feine Zeilenlinien' },
+    { id: 'radar', name: 'Funkradar', info: 'Ringe aus der Ecke' },
+    { id: 'karo', name: 'Karo', info: 'Schwaches Schachbrett' }
+  ];
+  function bgKey() { return authMode === 'discord' && me && me.username ? 'discord:' + me.username : 'browser'; }
+  function currentBg() {
+    var id = (prefs.hintergrund || {})[bgKey()] || '';
+    return HINTERGRUENDE.some(function (h) { return h.id === id; }) ? id : '';
+  }
+  function applyBg() {
+    var id = currentBg();
+    HINTERGRUENDE.forEach(function (h) { if (h.id) document.body.classList.toggle('bg-' + h.id, h.id === id); });
+  }
+  function renderBgOptions() {
+    var cur = currentBg();
+    $('bgOptions').innerHTML = HINTERGRUENDE.map(function (h) {
+      return '<label class="bg-option"><input type="radio" name="hintergrund" value="' + esc(h.id) + '"' + (h.id === cur ? ' checked' : '') + '>' +
+        '<span class="bg-prev' + (h.id ? ' bg-' + esc(h.id) : '') + '" aria-hidden="true"></span>' +
+        '<span class="bg-label">' + esc(h.name) + '<span class="muted">' + esc(h.info) + '</span></span></label>';
+    }).join('');
+  }
+  $('bgOptions').addEventListener('change', function (ev) {
+    if (ev.target.name !== 'hintergrund') return;
+    prefs.hintergrund = prefs.hintergrund || {};
+    if (ev.target.value) prefs.hintergrund[bgKey()] = ev.target.value; else delete prefs.hintergrund[bgKey()];
+    savePrefs(); applyBg();
+  });
+  var settingsReturn = null;
+  function openSettings() {
+    settingsReturn = document.activeElement;
+    renderBgOptions();
+    $('settingsGate').hidden = false;
+    var sel = $('bgOptions').querySelector('input:checked') || $('bgOptions').querySelector('input');
+    if (sel) sel.focus();
+  }
+  function closeSettings() {
+    $('settingsGate').hidden = true;
+    if (settingsReturn && settingsReturn.focus) settingsReturn.focus();
+  }
+  $('settingsBtn').addEventListener('click', openSettings);
+  $('settingsClose').addEventListener('click', closeSettings);
+  $('settingsGate').addEventListener('click', function (ev) { if (ev.target === $('settingsGate')) closeSettings(); });
+  $('settingsGate').addEventListener('keydown', function (ev) { if (ev.key === 'Escape') closeSettings(); });
+
   function enterDiscord() {
     authMode = 'discord'; mode = 'server';
     var reason = new URLSearchParams(location.search).get('login');

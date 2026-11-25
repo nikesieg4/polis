@@ -523,3 +523,27 @@ body.no-officer #hbNewBtn { opacity: 0.45; cursor: not-allowed; }
 }
 @media (max-width: 640px) { .plan-canvas { height: 60vh; min-height: 300px; } .plan-sep { display: none; } }
 @media (max-width: 960px) { .plan-main { order: -1; } }
+
+/* Einstellungen: Hintergrundmuster (nur für die angemeldete Person) */
+body.bg-gitter, .bg-prev.bg-gitter { background-image: linear-gradient(rgba(76,141,255,.10) 1px, transparent 1px), linear-gradient(90deg, rgba(76,141,255,.10) 1px, transparent 1px), linear-gradient(rgba(76,141,255,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(76,141,255,.05) 1px, transparent 1px); background-size: 96px 96px, 96px 96px, 24px 24px, 24px 24px; }
+body.bg-punkte, .bg-prev.bg-punkte { background-image: radial-gradient(rgba(154,166,191,.22) 1px, transparent 1.5px); background-size: 18px 18px; }
+body.bg-schraffur, .bg-prev.bg-schraffur { background-image: repeating-linear-gradient(135deg, rgba(36,48,74,.55) 0 1px, transparent 1px 14px); }
+body.bg-scan, .bg-prev.bg-scan { background-image: repeating-linear-gradient(0deg, rgba(76,141,255,.06) 0 1px, transparent 1px 4px), linear-gradient(180deg, #0E1628 0%, #0B1220 60%); }
+body.bg-radar, .bg-prev.bg-radar { background-image: repeating-radial-gradient(circle at 85% 15%, rgba(76,141,255,.09) 0 1px, transparent 1px 40px); }
+body.bg-karo, .bg-prev.bg-karo { background-image: conic-gradient(rgba(36,48,74,.35) 25%, transparent 0 50%, rgba(36,48,74,.35) 0 75%, transparent 0); background-size: 32px 32px; }
+body[class*="bg-"] { background-attachment: fixed; }
+.bg-prev.bg-radar { background-image: repeating-radial-gradient(circle at 85% 15%, rgba(76,141,255,.14) 0 1px, transparent 1px 16px); }
+
+.settings-card { width: 100%; max-width: 640px; max-height: calc(100vh - 32px); overflow-y: auto; }
+.bg-fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.bg-fieldset legend { padding: 0; margin-bottom: 4px; }
+.bg-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.bg-option { position: relative; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; background: var(--inset); }
+.bg-option input { position: absolute; opacity: 0; pointer-events: none; }
+.bg-option:hover { border-color: var(--field); }
+.bg-option:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.bg-option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bg-prev { height: 72px; background-color: var(--bg); border-bottom: 1px solid var(--line); }
+.bg-label { padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; font-size: 14px; font-weight: 600; }
+.bg-label .muted { font-weight: 400; font-size: 12px; }
+.settings-gate { background: rgba(6, 10, 20, 0.55); }
