@@ -243,7 +243,17 @@ async function readBody(request) {
   try { return await request.json(); } catch { return {}; }
 }
 
+// Jeder unerwartete Fehler wird als lesbare Meldung zurückgegeben statt als nackter Fehler 500
 export async function onRequest(context) {
+  try {
+    return await handle(context);
+  } catch (e) {
+    console.error('POLIS Serverfehler', e && e.stack || e);
+    return json({ error: 'Serverfehler: ' + String((e && e.message) || e).slice(0, 200) }, 500);
+  }
+}
+
+async function handle(context) {
   const { request, env, params } = context;
   const parts = Array.isArray(params.path) ? params.path : params.path ? [params.path] : [];
   const method = request.method;
@@ -257,10 +267,16 @@ export async function onRequest(context) {
   // --- Öffentlich: Status ---
   if (route === 'health') {
     const discord = discordConfigured(env);
+    // Kann der Bot den Discord-Server lesen? (Rollenliste, 10 Minuten zwischengespeichert)
+    let discordBot = null;
+    if (discord) {
+      try { const r = await guildRoleList(env); discordBot = 'ok (' + r.length + ' Rollen)'; }
+      catch (e) { discordBot = 'Fehler: ' + String(e.message || e).slice(0, 150); }
+    }
     return json({ ok: true, db: !!env.DB, auth: discord ? 'discord' : 'key', keySet: discord || !!env.POLIS_KEY,
       // Testphase: solange POLIS_KEY gesetzt ist, geht auch die Anmeldung ohne Discord
       keyLogin: discord && !!env.POLIS_KEY, adminSet: !!env.POLIS_KEY_ADMIN,
-      discordMissing: discordMissing(env) });
+      discordMissing: discordMissing(env), discordServer: env.DISCORD_GUILD_ID || null, discordBot });
   }
 
   // --- Öffentlich: Avatarbild (nur Weiterleitung auf Roblox-CDN) ---
