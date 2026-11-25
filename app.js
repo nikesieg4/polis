@@ -1578,6 +1578,7 @@
 
   // ---------- Grundrisse (Recht „grundrisse“) ----------
   // Ein Plan besteht aus Elementen in Studs: Räume (Rechteck), Wände/Türen/Fenster (Linie), Markierungen (Punkt).
+  var gMoebel = { Stuhl: { w: 3, h: 3 }, Schrank: { w: 4, h: 2 } }, gGeist = null, gDreh = 0;
   var gLetzteArt = 'Sonstiges', gList = null, gArten = [], gPlan = null, gSel = -1, gTool = 'sel', gDirty = false, gUndo = [], gDrag = null, gMess = null;
   var gV = { x: -5, y: -5, s: 14 }; // linke obere Ecke in Studs, Pixel pro Stud
   var GFARBE = { Eingang: '#5BE3A0', Tresor: '#F5B841', Kasse: '#8FB4FF', Vitrine: '#C3A6FF', Kamera: '#FF7A7A', Alarm: '#FF5C5C', Deckung: '#9AA6BF', Treppe: '#7FD6E8', Sonstiges: '#E6EBF5' };
@@ -1589,6 +1590,11 @@
     '.g-tuer{stroke:#F5B841;stroke-width:4px;vector-effect:non-scaling-stroke}' +
     '.g-fenster{stroke:#7FD6E8;stroke-width:3px;stroke-dasharray:6 3;vector-effect:non-scaling-stroke}' +
     '.g-hit{stroke:transparent;stroke-width:16px;vector-effect:non-scaling-stroke}' +
+    '.g-stuhl{fill:rgba(201,162,107,.22);stroke:#C9A26B;stroke-width:1.5px;vector-effect:non-scaling-stroke}' +
+    '.g-schrank{fill:rgba(154,166,191,.18);stroke:#9AA6BF;stroke-width:1.5px;vector-effect:non-scaling-stroke}' +
+    '.g-lehne{stroke-width:4px}' +
+    '.g-geist{opacity:.45;pointer-events:none}' +
+    '.g-sel .g-stuhl,.g-sel .g-schrank{stroke:#5BE3A0}' +
     '.g-mess{stroke:#5BE3A0;stroke-width:2px;stroke-dasharray:5 4;vector-effect:non-scaling-stroke}' +
     '.g-neu{fill:rgba(91,227,160,.12);stroke:#5BE3A0;stroke-width:2px;stroke-dasharray:5 4;vector-effect:non-scaling-stroke}' +
     '.g-sel .g-raum,.g-sel .g-wand,.g-sel .g-tuer,.g-sel .g-fenster{stroke:#5BE3A0}' +
@@ -1608,10 +1614,28 @@
   function gSnapN(n) { var r = gSnapV(); return Math.round(n / r) * r; }
   function gClone(o) { return JSON.parse(JSON.stringify(o)); }
   function gIstLinie(e) { return e && (e.t === 'wand' || e.t === 'tuer' || e.t === 'fenster'); }
-  var G_NAMEN = { raum: 'Raum', wand: 'Wand', tuer: 'Tür', fenster: 'Fenster', punkt: 'Markierung' };
+  var G_NAMEN = { raum: 'Raum', wand: 'Wand', tuer: 'Tür', fenster: 'Fenster', punkt: 'Markierung', moebel: 'Möbel' };
+  function gIstMoebelTool(t) { return !!gMoebel[t]; }
+  // Grundfläche eines Möbelstücks (bei 90° und 270° Breite und Tiefe getauscht)
+  function gFlaeche(e) {
+    var m = gMoebel[e.art] || { w: 1, h: 1 }, quer = e.r === 90 || e.r === 270;
+    return { w: quer ? m.h : m.w, h: quer ? m.w : m.h };
+  }
+  // Möbel um seine Mitte drehen; die Mitte bleibt stehen
+  function gDrehen(e, r) {
+    var a = gFlaeche(e), cx = e.x + a.w / 2, cy = e.y + a.h / 2;
+    e.r = ((r % 360) + 360) % 360;
+    var b = gFlaeche(e);
+    e.x = Math.round((cx - b.w / 2) * 10) / 10; e.y = Math.round((cy - b.h / 2) * 10) / 10;
+  }
+  function gNeuesMoebel(art, p) {
+    var e = { t: 'moebel', art: art, x: 0, y: 0, r: gDreh }, a = gFlaeche(e);
+    e.x = gSnapN(p.x - a.w / 2); e.y = gSnapN(p.y - a.h / 2);
+    return e;
+  }
 
   function loadGrundrisse() {
-    return api('grundrisse').then(function (d) { gList = d.grundrisse; gArten = d.arten || []; renderGList(); })
+    return api('grundrisse').then(function (d) { gList = d.grundrisse; gArten = d.arten || []; if (d.moebel) gMoebel = d.moebel; renderGList(); })
       .catch(function (e) { $('gList').innerHTML = '<div class="placeholder">' + esc(e.message) + '</div>'; });
   }
   function renderGList() {
@@ -1698,9 +1722,9 @@
       return '<text x="' + x + '" y="' + y + '" font-size="' + (gross ? f * 1.1 : f * 0.95) + '" text-anchor="middle" dominant-baseline="middle"' + (cls ? ' class="' + cls + '"' : '') + '>' + esc(t) + '</text>';
     }
     function griff(x, y, h) { return '<rect class="g-h" data-h="' + h + '" x="' + (x - hs) + '" y="' + (y - hs) + '" width="' + 2 * hs + '" height="' + 2 * hs + '"/>'; }
-    var reihen = { raum: [], linie: [], punkt: [] };
-    els.forEach(function (e, i) { (e.t === 'raum' ? reihen.raum : e.t === 'punkt' ? reihen.punkt : reihen.linie).push(i); });
-    reihen.raum.concat(reihen.linie, reihen.punkt).forEach(function (i) {
+    var reihen = { raum: [], moebel: [], linie: [], punkt: [] };
+    els.forEach(function (e, i) { (reihen[e.t] || reihen.linie).push(i); });
+    reihen.raum.concat(reihen.moebel, reihen.linie, reihen.punkt).forEach(function (i) {
       var e = els[i], sel = i === auswahl;
       out += '<g data-i="' + i + '"' + (sel ? ' class="g-sel"' : '') + '>';
       if (e.t === 'raum') {
@@ -1709,6 +1733,15 @@
         if (e.name && platz) out += txt(cx, cy - (masse ? f * 0.7 : 0), e.name, '', true);
         if (masse && platz) out += txt(cx, cy + (e.name ? f * 0.7 : 0), gNum(e.w) + ' × ' + gNum(e.h), 'g-mass');
         else if (e.name && !platz) out += txt(cx, e.y - f * 0.8, e.name);
+      } else if (e.t === 'moebel') {
+        // in Grundstellung zeichnen und um die Mitte drehen; Lehne bzw. Rückwand liegt oben
+        var m = gMoebel[e.art] || { w: 1, h: 1 }, fl = gFlaeche(e), mx0 = e.x + fl.w / 2, my0 = e.y + fl.h / 2;
+        var lx = mx0 - m.w / 2, ly = my0 - m.h / 2, cls = e.art === 'Stuhl' ? 'g-stuhl' : 'g-schrank';
+        out += '<g transform="rotate(' + (e.r || 0) + ' ' + mx0 + ' ' + my0 + ')">' +
+          '<rect class="' + cls + '" x="' + lx + '" y="' + ly + '" width="' + m.w + '" height="' + m.h + '"' + (e.art === 'Stuhl' ? ' rx="0.4"' : '') + '/>' +
+          '<line class="' + cls + ' g-lehne" x1="' + (lx + 0.15) + '" y1="' + (ly + 0.15) + '" x2="' + (lx + m.w - 0.15) + '" y2="' + (ly + 0.15) + '"/>' +
+          (e.art === 'Schrank' ? '<line class="' + cls + '" x1="' + mx0 + '" y1="' + (ly + 0.3) + '" x2="' + mx0 + '" y2="' + (ly + m.h) + '"/>' : '') + '</g>';
+        if (masse && Math.min(fl.w, fl.h) * s > 40) out += txt(mx0, my0 + f * 0.2, gNum(fl.w) + '×' + gNum(fl.h), 'g-mass');
       } else if (gIstLinie(e)) {
         var l = 'x1="' + e.x1 + '" y1="' + e.y1 + '" x2="' + e.x2 + '" y2="' + e.y2 + '"';
         out += '<line class="g-hit" ' + l + '/><line class="g-' + e.t + '" ' + l + '/>';
@@ -1758,6 +1791,7 @@
           '<text class="g-masstark" font-size="' + f * 1.1 + '" x="' + b.x + '" y="' + (b.y - f * 1.2) + '" text-anchor="middle">' + gNum(gLen({ x1: a.x, y1: a.y, x2: b.x, y2: b.y })) + '</text>';
       }
     }
+    if (gGeist && gIstMoebelTool(gTool) && !gDrag) extra += gMarkup([gNeuesMoebel(gTool, gGeist)], gV.s, -1, false).replace('data-i="0"', 'class="g-geist"');
     if (gMess && !(gDrag && gDrag.art === 'neu')) {
       extra += '<line class="g-mess" x1="' + gMess.x1 + '" y1="' + gMess.y1 + '" x2="' + gMess.x2 + '" y2="' + gMess.y2 + '"/>' +
         '<text class="g-masstark" font-size="' + f * 1.1 + '" x="' + (gMess.x1 + gMess.x2) / 2 + '" y="' + ((gMess.y1 + gMess.y2) / 2 - f) + '" text-anchor="middle">' + gNum(gLen(gMess)) + ' Studs</text>';
@@ -1775,6 +1809,7 @@
     els.forEach(function (e) {
       if (e.t === 'raum') { p(e.x, e.y); p(e.x + e.w, e.y + e.h); }
       else if (gIstLinie(e)) { p(e.x1, e.y1); p(e.x2, e.y2); }
+      else if (e.t === 'moebel') { var a = gFlaeche(e); p(e.x, e.y); p(e.x + a.w, e.y + a.h); }
       else p(e.x, e.y);
     });
     return b;
@@ -1806,7 +1841,7 @@
   }, { passive: false });
 
   function gWerkzeug(t) {
-    gTool = t; gMess = null;
+    gTool = t; gMess = null; gGeist = null;
     document.querySelectorAll('.tool-btn').forEach(function (b) { b.classList.toggle('active', b.dataset.tool === t); });
     $('gCanvas').classList.toggle('tool-sel', t === 'sel');
     gRender();
@@ -1847,6 +1882,11 @@
       gSel = Number(eEl.dataset.i); gMerke();
       gDrag = { art: 'move', start: sp, orig: gClone(gPlan.elemente[gSel]), undo: true };
       gProps();
+    } else if (gIstMoebelTool(gTool)) {
+      gMerke();
+      gPlan.elemente.push(gNeuesMoebel(gTool, p));
+      gSel = gPlan.elemente.length - 1; gAenderung(); gProps();
+      gDrag = { art: 'move', start: sp, orig: gClone(gPlan.elemente[gSel]), undo: true, bewegt: true };
     } else if (gTool === 'punkt') {
       gMerke();
       gPlan.elemente.push({ t: 'punkt', x: sp.x, y: sp.y, art: gLetzteArt, name: '' });
@@ -1862,7 +1902,7 @@
     if (gZeiger[ev.pointerId]) gZeiger[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
     var p = gPunkt(ev), sp = gSnapP(p);
     $('gPos').textContent = 'X ' + gNum(sp.x) + '  Y ' + gNum(sp.y) + '  (Studs)';
-    if (!gDrag) return;
+    if (!gDrag) { if (gIstMoebelTool(gTool) && ev.pointerType === 'mouse') { gGeist = p; gRender(); } return; }
     if (gDrag.art === 'pinch') {
       var ids = Object.keys(gZeiger); if (ids.length < 2) return;
       var p1 = gZeiger[ids[0]], p2 = gZeiger[ids[1]], r = $('gSvg').getBoundingClientRect();
@@ -1875,7 +1915,7 @@
     } else if (gDrag.art === 'move') {
       var dx = sp.x - gDrag.start.x, dy = sp.y - gDrag.start.y, o = gDrag.orig, e = gPlan.elemente[gSel];
       if (dx || dy) gDrag.bewegt = true;
-      if (e.t === 'raum' || e.t === 'punkt') { e.x = o.x + dx; e.y = o.y + dy; }
+      if (e.t === 'raum' || e.t === 'punkt' || e.t === 'moebel') { e.x = o.x + dx; e.y = o.y + dy; }
       else { e.x1 = o.x1 + dx; e.y1 = o.y1 + dy; e.x2 = o.x2 + dx; e.y2 = o.y2 + dy; }
       if (gDrag.bewegt) gAenderung();
     } else if (gDrag.art === 'griff') {
@@ -1925,7 +1965,7 @@
   }
   $('gSvg').addEventListener('pointerup', gLoslassen);
   $('gSvg').addEventListener('pointercancel', gLoslassen);
-  $('gSvg').addEventListener('pointerleave', function () { $('gPos').textContent = 'Maße in Studs'; });
+  $('gSvg').addEventListener('pointerleave', function () { $('gPos').textContent = 'Maße in Studs'; if (gGeist) { gGeist = null; gRender(); } });
 
   // Tastatur: nur in der Ansicht Grundrisse und nicht beim Tippen
   document.addEventListener('keydown', function (ev) {
@@ -1937,9 +1977,17 @@
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
     if ((ev.key === 'Delete' || ev.key === 'Backspace') && gSel >= 0) { ev.preventDefault(); gLoeschen(); return; }
     if (ev.key === 'Escape') { gSel = -1; gMess = null; gProps(); gRender(); return; }
-    var t = { v: 'sel', r: 'raum', w: 'wand', t: 'tuer', f: 'fenster', m: 'punkt', l: 'mess' }[ev.key.toLowerCase()];
+    if (ev.key.toLowerCase() === 'd') { gDrehTaste(); return; }
+    var t = { v: 'sel', r: 'raum', w: 'wand', t: 'tuer', f: 'fenster', m: 'punkt', l: 'mess', s: 'Stuhl', k: 'Schrank' }[ev.key.toLowerCase()];
     if (t) gWerkzeug(t);
   });
+  // D: ausgewähltes Möbel drehen, sonst die Drehung für das nächste Möbel
+  function gDrehTaste() {
+    var e = gSel >= 0 ? gPlan.elemente[gSel] : null;
+    if (e && e.t === 'moebel') { gMerke(); gDrehen(e, (e.r || 0) + 90); gDreh = e.r; gAenderung(); gProps(); }
+    else if (gIstMoebelTool(gTool)) gDreh = (gDreh + 90) % 360;
+    gRender();
+  }
   function gLoeschen() {
     if (gSel < 0) return;
     gMerke(); gPlan.elemente.splice(gSel, 1); gSel = -1; gAenderung(); gProps(); gRender();
@@ -1952,12 +2000,23 @@
   function gProps() {
     var e = gPlan && gSel >= 0 ? gPlan.elemente[gSel] : null, h = '';
     if (!e) {
-      h = '<p class="hint">Werkzeug wählen und im Plan ziehen. Ausgewähltes Element: Maße unten eintippen, mit Entf löschen. Ansicht verschieben: mit „Auswählen“ auf freie Fläche ziehen; zoomen mit Mausrad oder zwei Fingern. Tastenkürzel: V, R, W, T, F, M, L, Strg+Z, Strg+S.</p>';
+      h = '<p class="hint">Werkzeug wählen und im Plan ziehen. Ausgewähltes Element: Maße unten eintippen, mit Entf löschen. Ansicht verschieben: mit „Auswählen“ auf freie Fläche ziehen; zoomen mit Mausrad oder zwei Fingern. Möbel: „Stuhl“ (3 × 3) oder „Schrank“ (2 × 4) wählen und in den Plan klicken, D dreht um 90°. Tastenkürzel: V, R, W, T, F, M, S, K, L, D, Strg+Z, Strg+S.</p>';
     } else {
       h = '<strong class="small">' + G_NAMEN[e.t] + '</strong>';
       if (e.t === 'raum') {
         h += '<label class="field wide">Name<input id="gpName" type="text" maxlength="60" value="' + esc(e.name || '') + '" placeholder="z. B. Schalterhalle"></label>' +
           gFeld('gpX', 'X', e.x) + gFeld('gpY', 'Y', e.y) + gFeld('gpW', 'Breite', e.w) + gFeld('gpH', 'Tiefe', e.h);
+      } else if (e.t === 'moebel') {
+        var fm = gFlaeche(e);
+        h += '<label class="field">Art<select id="gpArt">' + Object.keys(gMoebel).map(function (a) {
+          return '<option' + (a === e.art ? ' selected' : '') + '>' + esc(a) + '</option>';
+        }).join('') + '</select></label>' +
+          gFeld('gpX', 'X', e.x) + gFeld('gpY', 'Y', e.y) +
+          '<label class="field">Drehung<select id="gpR">' + [0, 90, 180, 270].map(function (r) {
+            return '<option value="' + r + '"' + (r === (e.r || 0) ? ' selected' : '') + '>' + r + '°</option>';
+          }).join('') + '</select></label>' +
+          '<span class="muted small mono" id="gpFl">' + gNum(fm.w) + ' × ' + gNum(fm.h) + ' Studs</span>' +
+          '<button type="button" id="gpDreh" class="btn-ghost">Drehen</button>';
       } else if (gIstLinie(e)) {
         h += '<label class="field">Art<select id="gpArt">' + ['wand', 'tuer', 'fenster'].map(function (t) {
           return '<option value="' + t + '"' + (t === e.t ? ' selected' : '') + '>' + G_NAMEN[t] + '</option>';
@@ -1977,7 +2036,7 @@
   // Nur die Zahlen auffrischen (beim Ziehen), ohne das Feld mit dem Fokus zu überschreiben
   function gPropsWerte() {
     var e = gSel >= 0 ? gPlan.elemente[gSel] : null; if (!e) return;
-    var w = e.t === 'raum' ? { gpX: e.x, gpY: e.y, gpW: e.w, gpH: e.h } : gIstLinie(e) ? { gpX1: e.x1, gpY1: e.y1, gpX2: e.x2, gpY2: e.y2, gpL: gLen(e) } : { gpX: e.x, gpY: e.y };
+    var w = e.t === 'raum' ? { gpX: e.x, gpY: e.y, gpW: e.w, gpH: e.h } : e.t === 'moebel' ? { gpX: e.x, gpY: e.y } : gIstLinie(e) ? { gpX1: e.x1, gpY1: e.y1, gpX2: e.x2, gpY2: e.y2, gpL: gLen(e) } : { gpX: e.x, gpY: e.y };
     Object.keys(w).forEach(function (k) { var f = $(k); if (f && f !== document.activeElement) f.value = Math.round(w[k] * 10) / 10; });
   }
   var gPropMerk = false;
@@ -1987,6 +2046,13 @@
     if (!gPropMerk) { gMerke(); gPropMerk = true; }
     var raw = ev.target.value, n = Number(String(raw).replace(',', '.'));
     if (id === 'gpName') e.name = raw.slice(0, 60);
+    else if (id === 'gpArt' && e.t === 'moebel') {
+      // anderes Möbel an derselben Stelle: Mitte bleibt
+      var fa = gFlaeche(e), mx = e.x + fa.w / 2, my = e.y + fa.h / 2;
+      e.art = raw; var fb = gFlaeche(e);
+      e.x = Math.round((mx - fb.w / 2) * 10) / 10; e.y = Math.round((my - fb.h / 2) * 10) / 10; gProps();
+    }
+    else if (id === 'gpR') { gDrehen(e, Number(raw)); gDreh = e.r; gProps(); }
     else if (id === 'gpArt') { if (gIstLinie(e)) e.t = raw; else { e.art = raw; gLetzteArt = raw; } }
     else if (raw === '' || !isFinite(n)) return;
     else if (id === 'gpX') e.x = n; else if (id === 'gpY') e.y = n;
@@ -2003,6 +2069,7 @@
   });
   $('gProps').addEventListener('click', function (ev) {
     if (ev.target.id === 'gpDel') gLoeschen();
+    if (ev.target.id === 'gpDreh') gDrehTaste();
     if (ev.target.id === 'gpDup' && gSel >= 0) {
       gMerke();
       var c = gClone(gPlan.elemente[gSel]), v = gSnapV() * 2;
