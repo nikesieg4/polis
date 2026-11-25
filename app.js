@@ -731,7 +731,7 @@
     var hbOk = canHb();
     $('hbNewBtn').hidden = !hbOk || !$('hbForm').hidden;
     $('hbRankNote').hidden = hbOk;
-    $('hbRankNote').textContent = 'Haftbefehle ausstellen und bearbeiten ab A' + ((me && me.hbMinRank) || 4) + '.';
+    $('hbRankNote').textContent = 'Haftbefehle ausstellen darf nur, wer das Recht „Haftbefehle bearbeiten“ hat.';
     if (!hbOk) $('hbForm').hidden = true;
     $('hbList').innerHTML = (ui.hbMsg ? '<span class="saved hb-msg" role="status">' + esc(ui.hbMsg) + '</span>' : '') +
       (!list ? '<span class="empty-note">Wird geladen</span>' : list.length ? list.map(function (h) {
@@ -773,7 +773,21 @@
   }
   function closeHbForm() {
     $('hbForm').hidden = true; $('hbNewBtn').hidden = !canHb(); $('hbFormError').textContent = '';
+    $('hbVorschlag').hidden = true;
     ['hbKz', 'hbModell', 'hbGrund', 'hbBeweise'].forEach(function (id) { $(id).value = ''; });
+  }
+  // Nach einer Strafe mit Haft: Haftbefehl vorausgefüllt vorschlagen, nur das Fahrzeug fehlt noch
+  function schlageHbVor(c) {
+    if (mode !== 'server' || !canHb() || $('hbBox').hidden) return;
+    var grund = c.para + ' ' + c.name;
+    var bisher = $('hbForm').hidden ? '' : $('hbGrund').value.trim();
+    if (bisher && bisher.indexOf(grund) < 0) grund = (bisher + ', ' + grund).slice(0, 200);
+    else if (bisher) grund = bisher;
+    $('hbForm').hidden = false; $('hbNewBtn').hidden = true; $('hbFormError').textContent = '';
+    $('hbGrund').value = grund;
+    $('hbVorschlag').hidden = false;
+    $('hbBox').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    $('hbKz').focus({ preventScroll: true });
   }
 
   // Strafen sind laut Katalog fest; Anpassen gibt es nicht mehr
@@ -1081,7 +1095,8 @@
       var p = findPerson(ui.selId);
       var c = KATALOG.find(function (k) { return k.nr === Number(el.dataset.nr); });
       if (!p || !c || ui.busy) return;
-      run(p, store.addEntries(p.id, [{ nr: c.nr }]), c.para + ' ' + c.name + ' vergeben.' + (c.haft ? ' Person ins Gefängnis bringen.' : ''));
+      run(p, store.addEntries(p.id, [{ nr: c.nr }]), c.para + ' ' + c.name + ' vergeben.' + (c.haft ? ' Person ins Gefängnis bringen.' : ''))
+        .then(function () { if (c.haft && !ui.error && ui.selId === p.id) schlageHbVor(c); });
     } else if (a === 'all-done') {
       var p2 = findPerson(ui.selId);
       if (p2 && !ui.busy) run(p2, store.allDone(p2.id), '');
@@ -1174,7 +1189,7 @@
     }).catch(function (e) { btn.disabled = false; $('gruppeError').textContent = e.message; });
   });
   $('hbNewBtn').addEventListener('click', function () {
-    $('hbForm').hidden = false; $('hbNewBtn').hidden = true; $('hbFormError').textContent = '';
+    $('hbForm').hidden = false; $('hbNewBtn').hidden = true; $('hbFormError').textContent = ''; $('hbVorschlag').hidden = true;
     $('hbGrund').focus();
   });
   $('hbCancel').addEventListener('click', closeHbForm);

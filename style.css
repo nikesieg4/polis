@@ -234,7 +234,9 @@ h3 { font-size: 14px; font-weight: 600; }
 .alert-hb { background: #4A1418; color: #FFC2C2; }
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .hb-form { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 6px; background: var(--inset); border: 1px solid var(--line-soft); }
+.hb-form > .field { flex: 0 0 auto; }
 .hb-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.hb-vorschlag { margin: 0; padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(245, 180, 60, .45); background: rgba(245, 180, 60, .1); color: var(--text, inherit); font-size: .9em; line-height: 1.4; }
 .hb-form-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 #hbList { display: flex; flex-direction: column; gap: 8px; }
 .hb { padding: 12px; border-radius: 6px; background: var(--inset); border: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 8px; }
