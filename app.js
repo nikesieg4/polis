@@ -919,7 +919,9 @@
       if (me.avatar) $('meAvatar').src = me.avatar;
     }
   }
-  // ---------- Einstellungen: Hintergrund (pro Person, nur in diesem Browser) ----------
+  // ---------- Einstellungen: Hintergrund ----------
+  // Mit Discord: in der Datenbank je Discord-Konto (folgt der Person auf jedes Gerät).
+  // Ohne Discord (Dienstschlüssel, lokaler Modus): nur in diesem Browser.
   var HINTERGRUENDE = [
     { id: '', name: 'Standard', info: 'Einfarbig, ohne Muster' },
     { id: 'gitter', name: 'Lageraster', info: 'Feines Gitter' },
@@ -929,9 +931,10 @@
     { id: 'radar', name: 'Funkradar', info: 'Ringe aus der Ecke' },
     { id: 'karo', name: 'Karo', info: 'Schwaches Schachbrett' }
   ];
-  function bgKey() { return authMode === 'discord' && me && me.username ? 'discord:' + me.username : 'browser'; }
+  function bgAmKonto() { return authMode === 'discord' && !!me && !!me.einstellungen; }
   function currentBg() {
-    var id = (prefs.hintergrund || {})[bgKey()] || '';
+    var id = bgAmKonto() ? me.einstellungen.hintergrund : (prefs.hintergrund || {}).browser;
+    id = id || '';
     return HINTERGRUENDE.some(function (h) { return h.id === id; }) ? id : '';
   }
   function applyBg() {
@@ -940,6 +943,10 @@
   }
   function renderBgOptions() {
     var cur = currentBg();
+    $('bgHint').textContent = bgAmKonto()
+      ? 'Gilt nur für dich und wird an deinem Discord-Konto gespeichert, also auf jedem Gerät, auf dem du dich anmeldest.'
+      : 'Gilt nur für dich in diesem Browser. Mit Discord-Anmeldung wird die Wahl an deinem Konto gespeichert.';
+    $('bgMsg').textContent = '';
     $('bgOptions').innerHTML = HINTERGRUENDE.map(function (h) {
       return '<label class="bg-option"><input type="radio" name="hintergrund" value="' + esc(h.id) + '"' + (h.id === cur ? ' checked' : '') + '>' +
         '<span class="bg-prev' + (h.id ? ' bg-' + esc(h.id) : '') + '" aria-hidden="true"></span>' +
@@ -948,10 +955,32 @@
   }
   $('bgOptions').addEventListener('change', function (ev) {
     if (ev.target.name !== 'hintergrund') return;
-    prefs.hintergrund = prefs.hintergrund || {};
-    if (ev.target.value) prefs.hintergrund[bgKey()] = ev.target.value; else delete prefs.hintergrund[bgKey()];
-    savePrefs(); applyBg();
+    var id = ev.target.value;
+    if (!bgAmKonto()) {
+      prefs.hintergrund = { browser: id };
+      savePrefs(); applyBg();
+      return;
+    }
+    var vorher = me.einstellungen.hintergrund;
+    me.einstellungen.hintergrund = id; applyBg();
+    $('bgMsg').textContent = 'Wird gespeichert …';
+    api('einstellungen', { method: 'PUT', body: { hintergrund: id } }).then(function () {
+      $('bgMsg').textContent = 'Gespeichert.';
+    }).catch(function (e) {
+      if (me && me.einstellungen) me.einstellungen.hintergrund = vorher;
+      applyBg(); renderBgOptions();
+      $('bgMsg').textContent = 'Nicht gespeichert: ' + e.message;
+    });
   });
+  // Früher nur im Browser gespeicherte Wahl einmalig ans Discord-Konto übertragen
+  function uebernimmAltenBg() {
+    var alt = prefs.hintergrund && me && prefs.hintergrund['discord:' + me.username];
+    if (!alt || !bgAmKonto()) return;
+    delete prefs.hintergrund['discord:' + me.username]; savePrefs();
+    if (me.einstellungen.hintergrund) return;
+    me.einstellungen.hintergrund = alt; applyBg();
+    api('einstellungen', { method: 'PUT', body: { hintergrund: alt } }).catch(function () {});
+  }
   var settingsReturn = null;
   function openSettings() {
     settingsReturn = document.activeElement;
@@ -976,6 +1005,7 @@
     renderMe();
     api('me').then(function (m) {
       me = m; setPerms(m);
+      uebernimmAltenBg();
       $('discordGate').hidden = true;
       renderMe(); renderOfficer();
       enterServer();

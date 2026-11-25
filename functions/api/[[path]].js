@@ -75,6 +75,12 @@ const SCHEMA = [
   ...SCHICHT_SCHEMA,
   ...REGISTER_SCHEMA,
   ...GRUNDRISS_SCHEMA,
+  // Persönliche Einstellungen je Discord-Konto (z. B. Hintergrundmuster)
+  `CREATE TABLE IF NOT EXISTS einstellungen (
+     uid TEXT PRIMARY KEY,
+     hintergrund TEXT,
+     updated_at INTEGER
+   )`,
   `CREATE TABLE IF NOT EXISTS gruppen (
      name TEXT PRIMARY KEY COLLATE NOCASE,
      beschreibung TEXT,
@@ -82,6 +88,8 @@ const SCHEMA = [
      updated_by TEXT
    )`
 ];
+// Erlaubte Hintergrundmuster (siehe style.css, Klassen „bg-…“); leer = Standard
+const HINTERGRUENDE = ['', 'gitter', 'punkte', 'schraffur', 'scan', 'radar', 'karo'];
 const HB_STATUS = ['offen', 'vollstreckt', 'aufgehoben'];
 function hbOut(r) {
   return {
@@ -297,8 +305,20 @@ export async function onRequest(context) {
     uid = auth.member.uid;
     einheit = einheitFuer(auth.member.roles, roleList).einheit;
     if (route === 'me') {
+      const e = await db.prepare('SELECT hintergrund FROM einstellungen WHERE uid = ?').bind(uid).first();
       return json({ name: officer.name, username: auth.member.username, avatar: auth.member.avatar,
-        admin: perms.has('admin'), perms: [...perms], rang: auth.member.rang || 0 });
+        admin: perms.has('admin'), perms: [...perms], rang: auth.member.rang || 0,
+        einstellungen: { hintergrund: (e && e.hintergrund) || '' } });
+    }
+    // PUT /api/einstellungen – eigene Einstellungen speichern (gilt nur für dieses Discord-Konto)
+    if (route === 'einstellungen' && method === 'PUT') {
+      const body = await readBody(request);
+      const hg = clean(body && body.hintergrund, 20);
+      if (!HINTERGRUENDE.includes(hg)) return fail(400, 'Unbekannter Hintergrund.');
+      await db.prepare(`INSERT INTO einstellungen (uid, hintergrund, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(uid) DO UPDATE SET hintergrund = excluded.hintergrund, updated_at = excluded.updated_at`)
+        .bind(uid, hg, Date.now()).run();
+      return json({ einstellungen: { hintergrund: hg } });
     }
   } else {
     // --- Alter Weg: gemeinsamer Dienstschlüssel, Name und Dienstnummer selbst eingetragen ---
