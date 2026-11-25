@@ -76,7 +76,8 @@ const SCHEMA = [
   ...REGISTER_SCHEMA,
   ...GRUNDRISS_SCHEMA,
   // Persönliche Einstellungen je Discord-Konto (z. B. Hintergrundmuster)
-  `CREATE TABLE IF NOT EXISTS einstellungen (
+  // Eigener Tabellenname: „einstellungen“ ist schon die Tabelle der Rechte-Seite (key/value)
+  `CREATE TABLE IF NOT EXISTS nutzer_einstellungen (
      uid TEXT PRIMARY KEY,
      hintergrund TEXT,
      updated_at INTEGER
@@ -321,7 +322,7 @@ async function handle(context) {
     uid = auth.member.uid;
     einheit = einheitFuer(auth.member.roles, roleList).einheit;
     if (route === 'me') {
-      const e = await db.prepare('SELECT hintergrund FROM einstellungen WHERE uid = ?').bind(uid).first();
+      const e = await db.prepare('SELECT hintergrund FROM nutzer_einstellungen WHERE uid = ?').bind(uid).first();
       return json({ name: officer.name, username: auth.member.username, avatar: auth.member.avatar,
         admin: perms.has('admin'), perms: [...perms], rang: auth.member.rang || 0,
         einstellungen: { hintergrund: (e && e.hintergrund) || '' } });
@@ -331,7 +332,7 @@ async function handle(context) {
       const body = await readBody(request);
       const hg = clean(body && body.hintergrund, 20);
       if (!HINTERGRUENDE.includes(hg)) return fail(400, 'Unbekannter Hintergrund.');
-      await db.prepare(`INSERT INTO einstellungen (uid, hintergrund, updated_at) VALUES (?, ?, ?)
+      await db.prepare(`INSERT INTO nutzer_einstellungen (uid, hintergrund, updated_at) VALUES (?, ?, ?)
         ON CONFLICT(uid) DO UPDATE SET hintergrund = excluded.hintergrund, updated_at = excluded.updated_at`)
         .bind(uid, hg, Date.now()).run();
       return json({ einstellungen: { hintergrund: hg } });
